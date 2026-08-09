@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        This theme is only here so the manifest has a valid @style/... to point to.
+        Actual app theming (colors, typography) happens in Compose via
+        ComicReaderTheme in Theme.kt — this XML theme is not used for that.
+    -->
+    <style name="Theme.ComicReader" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

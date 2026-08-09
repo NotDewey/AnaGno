@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Existing app palette (matches your current Library screen) -->
+    <color name="app_background">#F5F5FA</color>
+    <color name="text_primary">#1A1A1F</color>
+    <color name="text_secondary">#6E6E76</color>
+    <color name="accent_blue">#3B5EDB</color>
+    <color name="progress_track">#E1E1EA</color>
+    <color name="anagno_icon_background">#FFFFFF</color>
+
+    <!-- Bottom nav / search bar (X-style) -->
+    <color name="nav_bar_background">#FFFFFFFA</color>
+    <color name="nav_icon_selected">#1A1A1F</color>
+    <color name="nav_icon_unselected">#8E8E96</color>
+    <color name="search_pill_background">#EEEEF3</color>
+    <color name="search_hint_text">#6E6E76</color>
+    <color name="avatar_placeholder">#D6D6E0</color>
+</resources>
