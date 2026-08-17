@@ -1,4 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/anagno_icon_background" />
+
+    <background android:drawable="@drawable/anagno_background" />
+
     <foreground android:drawable="@drawable/anagno_foreground" />
+
 </adaptive-icon>

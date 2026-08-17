@@ -10,7 +10,7 @@
         </item>
 
         <item name="android:windowSplashScreenAnimatedIcon">
-            @drawable/anagno_splash_clean
+            @drawable/splash_transparent
         </item>
 
         <item name="android:windowSplashScreenIconBackgroundColor">

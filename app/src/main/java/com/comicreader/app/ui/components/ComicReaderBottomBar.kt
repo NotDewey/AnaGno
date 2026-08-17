@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -501,31 +502,91 @@ fun ComicReaderBottomBar(
 
             renderedAction
                 ?.let { action ->
-                    GlassNavigationSurface(
-                        hazeState =
-                            hazeState,
-                        accented =
-                            true,
-                        modifier = Modifier
-                            .offset(
-                                x =
-                                    actionX
-                            )
-                            .size(
-                                actionSize
-                            )
-                            .graphicsLayer {
-                                alpha =
-                                    actionAlpha
-                                scaleX =
-                                    actionScale
-                                scaleY =
-                                    actionScale
-                            }
+                    /*
+                     * Contextual action bubble.
+                     *
+                     * Light mode keeps the original Haze/glass implementation.
+                     *
+                     * On some Samsung devices the detached Haze child can render
+                     * its dark glass body while dropping/occluding the child icon.
+                     * In dark mode we therefore keep the exact same geometry,
+                     * position, alpha and scale animation, but render this ONE
+                     * detached bubble as a normal Compose surface instead of a
+                     * Haze child. The main navigation dock still uses Haze.
+                     */
+                    if (
+                        isSystemInDarkTheme()
                     ) {
                         Box(
-                            modifier =
-                                Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .offset(
+                                    x =
+                                        actionX
+                                )
+                                .size(
+                                    actionSize
+                                )
+                                .graphicsLayer {
+                                    alpha =
+                                        actionAlpha
+                                    scaleX =
+                                        actionScale
+                                    scaleY =
+                                        actionScale
+                                }
+                                .zIndex(
+                                    20f
+                                )
+                                .shadow(
+                                    elevation =
+                                        14.dp,
+                                    shape =
+                                        RoundedCornerShape(
+                                            30.dp
+                                        ),
+                                    clip =
+                                        false,
+                                    ambientColor =
+                                        Color.Black.copy(
+                                            alpha =
+                                                0.16f
+                                        ),
+                                    spotColor =
+                                        Color.Black.copy(
+                                            alpha =
+                                                0.20f
+                                        )
+                                )
+                                .clip(
+                                    RoundedCornerShape(
+                                        30.dp
+                                    )
+                                )
+                                .background(
+                                    MaterialTheme
+                                        .colorScheme
+                                        .surfaceVariant
+                                        .copy(
+                                            alpha =
+                                                0.96f
+                                        )
+                                )
+                                .border(
+                                    width =
+                                        0.75.dp,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurface
+                                            .copy(
+                                                alpha =
+                                                    0.10f
+                                            ),
+                                    shape =
+                                        RoundedCornerShape(
+                                            30.dp
+                                        )
+                                ),
                             contentAlignment =
                                 Alignment.Center
                         ) {
@@ -549,9 +610,7 @@ fun ComicReaderBottomBar(
                                         action
                                             .contentDescription,
                                     tint =
-                                        MaterialTheme
-                                            .colorScheme
-                                            .onPrimaryContainer,
+                                        Color.White,
                                     modifier = Modifier
                                         .size(
                                             30.dp
@@ -568,6 +627,77 @@ fun ComicReaderBottomBar(
                                                 iconScale
                                         }
                                 )
+                            }
+                        }
+                    } else {
+                        GlassNavigationSurface(
+                            hazeState =
+                                hazeState,
+                            accented =
+                                true,
+                            modifier = Modifier
+                                .offset(
+                                    x =
+                                        actionX
+                                )
+                                .size(
+                                    actionSize
+                                )
+                                .graphicsLayer {
+                                    alpha =
+                                        actionAlpha
+                                    scaleX =
+                                        actionScale
+                                    scaleY =
+                                        actionScale
+                                }
+                        ) {
+                            Box(
+                                modifier =
+                                    Modifier.fillMaxSize(),
+                                contentAlignment =
+                                    Alignment.Center
+                            ) {
+                                IconButton(
+                                    onClick =
+                                        action.onClick,
+                                    enabled =
+                                        activeContextualAction !=
+                                                null &&
+                                                actionAlpha >
+                                                0.15f,
+                                    modifier =
+                                        Modifier.size(
+                                            58.dp
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector =
+                                            Icons.Default.Add,
+                                        contentDescription =
+                                            action
+                                                .contentDescription,
+                                        tint =
+                                            MaterialTheme
+                                                .colorScheme
+                                                .onPrimaryContainer,
+                                        modifier = Modifier
+                                            .size(
+                                                30.dp
+                                            )
+                                            .graphicsLayer {
+                                                val iconScale =
+                                                    0.76f +
+                                                            actionAlpha *
+                                                            0.24f
+
+                                                scaleX =
+                                                    iconScale
+                                                scaleY =
+                                                    iconScale
+                                            }
+                                    )
+                                }
                             }
                         }
                     }
