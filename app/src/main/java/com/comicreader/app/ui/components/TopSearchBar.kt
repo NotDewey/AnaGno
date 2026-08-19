@@ -1,5 +1,6 @@
 package com.comicreader.app.ui.components
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,9 +26,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-private val SearchTextColor = Color(0xFF1A1A1F)
-private val SearchHintColor = Color(0xFF6E6E76)
-private val SearchPillBackground = Color(0xFFEEEEF3)
+/**
+ * Solid companion shade for surfaces that should visually match the floating
+ * ComicReaderBottomBar without using Haze.
+ *
+ * The dark value matches the dock's visible charcoal tone, while the light
+ * value matches its soft neutral grey.
+ */
+@Composable
+fun comicReaderDockShade(): Color =
+    if (isSystemInDarkTheme()) {
+        Color(0xFF1A1A1C)
+    } else {
+        Color(0xFFE5E5E7)
+    }
 
 /**
  * Reusable pill-shaped text field used by every search bar.
@@ -44,6 +56,10 @@ fun SearchPill(
     modifier: Modifier = Modifier,
     showSearchIcon: Boolean = true
 ) {
+    val containerColor = comicReaderDockShade()
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val hintColor = MaterialTheme.colorScheme.onSurfaceVariant
+
     TextField(
         value = query,
         onValueChange = onQueryChange,
@@ -52,7 +68,7 @@ fun SearchPill(
             Text(
                 text = placeholder,
                 style = MaterialTheme.typography.bodyMedium,
-                color = SearchHintColor
+                color = hintColor
             )
         },
         leadingIcon = if (showSearchIcon) {
@@ -61,7 +77,7 @@ fun SearchPill(
                     imageVector = Icons.Filled.Search,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = SearchHintColor
+                    tint = hintColor
                 )
             }
         } else {
@@ -71,22 +87,22 @@ fun SearchPill(
         maxLines = 1,
         shape = RoundedCornerShape(50),
         textStyle = LocalTextStyle.current.copy(
-            color = SearchTextColor
+            color = textColor
         ),
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = SearchPillBackground,
-            unfocusedContainerColor = SearchPillBackground,
-            disabledContainerColor = SearchPillBackground,
+            focusedContainerColor = containerColor,
+            unfocusedContainerColor = containerColor,
+            disabledContainerColor = containerColor,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
             disabledIndicatorColor = Color.Transparent,
-            focusedTextColor = SearchTextColor,
-            unfocusedTextColor = SearchTextColor,
-            cursorColor = SearchTextColor,
-            focusedPlaceholderColor = SearchHintColor,
-            unfocusedPlaceholderColor = SearchHintColor,
-            focusedLeadingIconColor = SearchHintColor,
-            unfocusedLeadingIconColor = SearchHintColor
+            focusedTextColor = textColor,
+            unfocusedTextColor = textColor,
+            cursorColor = textColor,
+            focusedPlaceholderColor = hintColor,
+            unfocusedPlaceholderColor = hintColor,
+            focusedLeadingIconColor = hintColor,
+            unfocusedLeadingIconColor = hintColor
         )
     )
 }

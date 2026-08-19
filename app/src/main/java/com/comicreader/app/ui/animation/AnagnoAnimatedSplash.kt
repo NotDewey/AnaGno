@@ -1,11 +1,13 @@
 package com.comicreader.app.ui.animation
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -16,12 +18,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.comicreader.app.R
@@ -29,17 +35,42 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/*
+ * Real pathData for the "Outer A" mark, lifted directly from
+ * clean_rebuild_full.xml (viewportWidth=1189, viewportHeight=1037).
+ * It is one compound evenodd shape made of two subpaths:
+ *   - the outer silhouette (the A itself)
+ *   - the inner cutout (the negative-space notch near the base)
+ * Splitting them lets each subpath be traced as its own stroke,
+ * one after another, instead of guessing a centerline through them.
+ */
+private const val OUTER_SUBPATH =
+    "M276.2,664L243.2,526L516.2,15C521.4,4.3 522.2,1.8 531.2,2L653.2,2C660.1,2.3 660.2,3.4 666.2,14" +
+            "L907.2,472C920.2,504.9 941.7,519.7 931.2,606C924.2,649.6 914.1,668.1 887.2,709" +
+            "C867.9,738.4 741.2,858 741.2,858C715.6,879.9 715.3,918.6 719.2,935L1052.2,939" +
+            "C1058,938.1 1060.5,935.2 1059.2,930L932.2,699L966.2,560L1169.2,928" +
+            "C1205.1,995.7 1191.8,1033.6 1113.2,1033L621.2,1036C616,1035.9 615.6,1033.2 615.2,1029" +
+            "L616.2,926C616.6,875.2 628.3,835.2 654.2,809L766.2,692" +
+            "C811.9,655.5 834.6,623.5 838.2,587C838.6,571.9 841.5,542.3 832.2,527L597.2,96" +
+            "C592.2,85.4 588.6,85.3 583.2,96L276.2,664Z"
+
+private const val INNER_SUBPATH =
+    "M386.2,805L438.2,712L524.2,805C552.6,838.1 565.6,877.7 565.2,923L565.2,1030" +
+            "C564.9,1034.2 562.6,1036.2 558.2,1036L70.2,1034C7.4,1028.6 -18.5,996.6 14.2,922" +
+            "L215.2,558L250.2,698L123.2,931C119.5,936.9 119.7,940.7 128.2,940L462.2,936L462.2,908" +
+            "C461.2,877.6 418.2,827.2 386.2,805Z"
+
 @Composable
 fun AnagnoAnimatedSplash(
     onFinished: () -> Unit
 ) {
     /*
-     * OUTER-A TRACE SPLASH
+     * OUTER-A TRACE SPLASH (real-geometry version)
      *
      * DURING DRAW:
      *   - white background
-     *   - one black continuous stroke
-     *   - the stroke follows the main OUTER A
+     *   - the actual outer-silhouette path strokes on first
+     *   - the actual inner-cutout path strokes on right after
      *   - the finished logo stays completely hidden
      *
      * AFTER DRAW:
@@ -48,92 +79,91 @@ fun AnagnoAnimatedSplash(
      *   - splash fades away to reveal the app
      */
 
-    val pathProgress = remember { Animatable(0f) }
+    val isDarkTheme = isSystemInDarkTheme()
+    val backgroundColor = if (isDarkTheme) Color.Black else Color.White
+    val inkColor = if (isDarkTheme) Color.White else Color.Black
+
+    val outerProgress = remember { Animatable(0f) }
+    val innerProgress = remember { Animatable(0f) }
     val traceAlpha = remember { Animatable(1f) }
+    val strokeIntroAlpha = remember { Animatable(0f) }
     val logoAlpha = remember { Animatable(0f) }
-    val startDotAlpha = remember { Animatable(0f) }
     val splashAlpha = remember { Animatable(1f) }
 
-    /*
-     * Same visual size as before.
-     *
-     * Both the Canvas and the finished vector live inside the same 120.dp
-     * square. The Canvas uses the real 1189 x 1037 viewport with uniform
-     * FIT scaling, so the trace does not get stretched and lines up with
-     * the VectorDrawable.
-     */
     val splashLogoSize = 120.dp
 
-    /*
-     * CSS/Lottie-style ease-in-out:
-     * cubic-bezier(0.42, 0.0, 0.58, 1.0)
-     */
-    val drawEasing = CubicBezierEasing(
-        0.42f,
-        0.0f,
-        0.58f,
-        1.0f
-    )
+    // Constant velocity — no speeding up or slowing down mid-stroke,
+    // so the pace reads as steady and unhurried throughout.
+    val drawEasing = LinearEasing
+
+    // Parsed once — real geometry, not a hand-drawn guide.
+    val outerPath = remember { PathParser().parsePathString(OUTER_SUBPATH).toPath() }
+    val innerPath = remember { PathParser().parsePathString(INNER_SUBPATH).toPath() }
+
+    // PathMeasure.setPath() walks and segments the whole path — expensive
+    // to redo every frame for geometry that never changes. Measured once
+    // here instead of inside the Canvas draw scope.
+    val outerMeasure = remember {
+        PathMeasure().apply { setPath(outerPath, forceClosed = false) }
+    }
+    val innerMeasure = remember {
+        PathMeasure().apply { setPath(innerPath, forceClosed = false) }
+    }
+
+    // Reused every frame instead of allocating a new Path object 60 times
+    // a second — the allocation churn was landing right when the app is
+    // also busy finishing cold-start work, which is exactly what showed up
+    // as stutter at the start.
+    val visibleOuter = remember { Path() }
+    val visibleInner = remember { Path() }
 
     LaunchedEffect(Unit) {
-        // Start marker appears almost immediately.
-        startDotAlpha.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(60)
-        )
-
-        /*
-         * One uninterrupted trace:
-         *
-         * bottom-left
-         * -> up the left leg
-         * -> over the apex
-         * -> down the right leg
-         * -> through the characteristic right-hand bend
-         * -> down into the center stem
-         */
-        pathProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(
-                durationMillis = 1550,
-                easing = drawEasing
-            )
-        )
-
-        /*
-         * Cross-fade from the temporary trace into the untouched
-         * final vector logo.
-         */
+        // Smooth fade-in: the white background is opaque from the very
+        // first frame (never exposing the app underneath), but the stroke
+        // itself gently fades to full black instead of popping in at hard
+        // edges. The outer stroke's draw-on begins partway through this
+        // fade so the two blend together.
         coroutineScope {
             launch {
-                traceAlpha.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(250)
-                )
-            }
-
-            launch {
-                startDotAlpha.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(180)
-                )
-            }
-
-            launch {
-                logoAlpha.animateTo(
+                strokeIntroAlpha.animateTo(
                     targetValue = 1f,
-                    animationSpec = tween(250)
+                    animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing)
                 )
+            }
+            launch {
+                delay(150)
+
+                // Outer silhouette draws first.
+                outerProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 2200, easing = drawEasing)
+                )
+
+                // Inner cutout draws right after, no gap. Duration is scaled to
+                // the outer stroke's pixel-speed (outer path ≈5526 units, inner
+                // ≈2459 units) so the pen moves at a genuinely constant speed
+                // throughout, not just within each individual stroke.
+                innerProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 980, easing = drawEasing)
+                )
+            }
+        }
+
+        // Cross-fade from the trace into the untouched final vector logo.
+        coroutineScope {
+            launch {
+                traceAlpha.animateTo(targetValue = 0f, animationSpec = tween(250))
+            }
+            launch {
+                logoAlpha.animateTo(targetValue = 1f, animationSpec = tween(250))
             }
         }
 
         delay(160)
 
         // Reveal the already-loaded app underneath.
-        splashAlpha.animateTo(
-            targetValue = 0f,
-            animationSpec = tween(220)
-        )
+        splashAlpha.animateTo(targetValue = 0f, animationSpec = tween(220))
 
         onFinished()
     }
@@ -141,213 +171,81 @@ fun AnagnoAnimatedSplash(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                alpha = splashAlpha.value
-            }
-            .background(Color.White),
+            .graphicsLayer { alpha = splashAlpha.value }
+            .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
 
         /*
          * TRACE LAYER
          *
-         * The supplied VectorDrawable uses:
-         * viewportWidth  = 1189
-         * viewportHeight = 1037
-         *
-         * We preserve that aspect ratio inside the 120.dp square using
-         * one uniform scale, exactly like Image(..., ContentScale.Fit).
+         * Same 1189 x 1037 viewport as the VectorDrawable, uniformly
+         * scaled to fit the 120.dp square — matching ContentScale.Fit —
+         * so the trace lines up exactly with the final artwork.
          */
-        Canvas(
-            modifier = Modifier.size(splashLogoSize)
-        ) {
+        Canvas(modifier = Modifier.size(splashLogoSize)) {
             val viewportWidth = 1189f
             val viewportHeight = 1037f
 
-            val scale = minOf(
+            val scaleFactor = minOf(
                 size.width / viewportWidth,
                 size.height / viewportHeight
             )
 
-            val offsetX =
-                (size.width - viewportWidth * scale) / 2f
+            val offsetX = (size.width - viewportWidth * scaleFactor) / 2f
+            val offsetY = (size.height - viewportHeight * scaleFactor) / 2f
 
-            val offsetY =
-                (size.height - viewportHeight * scale) / 2f
-
-            fun p(
-                x: Float,
-                y: Float
-            ): Offset =
-                Offset(
-                    x = offsetX + x * scale,
-                    y = offsetY + y * scale
-                )
-
-            /*
-             * OUTER A GUIDE PATH
-             *
-             * This is intentionally a CENTER GUIDE rather than the filled
-             * VectorDrawable pathData itself.
-             *
-             * The supplied third <path> is a filled compound silhouette.
-             * PathMeasure on that filled outline would travel around its edges.
-             * This guide instead travels through the visual center of the A,
-             * producing the "draw the A with one stroke" effect.
-             */
-            val tracePath = Path().apply {
-
-                // ---------------------------------------------------------
-                // START — lower-left end of the outer A
-                // ---------------------------------------------------------
-                moveTo(
-                    p(123f, 931f).x,
-                    p(123f, 931f).y
-                )
-
-                // ---------------------------------------------------------
-                // LEFT LEG — rise through the center of the thick stroke
-                // ---------------------------------------------------------
-                cubicTo(
-                    p(160f, 860f).x, p(160f, 860f).y,
-                    p(220f, 735f).x, p(220f, 735f).y,
-                    p(276f, 664f).x, p(276f, 664f).y
-                )
-
-                cubicTo(
-                    p(335f, 525f).x, p(335f, 525f).y,
-                    p(430f, 300f).x, p(430f, 300f).y,
-                    p(516f, 80f).x, p(516f, 80f).y
-                )
-
-                // ---------------------------------------------------------
-                // APEX — smooth rounded transition across the top
-                // ---------------------------------------------------------
-                cubicTo(
-                    p(535f, 35f).x, p(535f, 35f).y,
-                    p(560f, 18f).x, p(560f, 18f).y,
-                    p(590f, 18f).x, p(590f, 18f).y
-                )
-
-                cubicTo(
-                    p(620f, 18f).x, p(620f, 18f).y,
-                    p(646f, 38f).x, p(646f, 38f).y,
-                    p(666f, 80f).x, p(666f, 80f).y
-                )
-
-                // ---------------------------------------------------------
-                // RIGHT LEG — descend along the main right-hand stroke
-                // ---------------------------------------------------------
-                cubicTo(
-                    p(720f, 185f).x, p(720f, 185f).y,
-                    p(790f, 350f).x, p(790f, 350f).y,
-                    p(832f, 527f).x, p(832f, 527f).y
-                )
-
-                // ---------------------------------------------------------
-                // SIGNATURE BEND — curve inward instead of continuing
-                // as a normal triangular A
-                // ---------------------------------------------------------
-                cubicTo(
-                    p(843f, 555f).x, p(843f, 555f).y,
-                    p(842f, 590f).x, p(842f, 590f).y,
-                    p(830f, 620f).x, p(830f, 620f).y
-                )
-
-                cubicTo(
-                    p(815f, 655f).x, p(815f, 655f).y,
-                    p(790f, 680f).x, p(790f, 680f).y,
-                    p(766f, 700f).x, p(766f, 700f).y
-                )
-
-                cubicTo(
-                    p(730f, 735f).x, p(730f, 735f).y,
-                    p(685f, 775f).x, p(685f, 775f).y,
-                    p(654f, 809f).x, p(654f, 809f).y
-                )
-
-                // ---------------------------------------------------------
-                // CENTER STEM — finish at the bottom center opening
-                // ---------------------------------------------------------
-                cubicTo(
-                    p(625f, 845f).x, p(625f, 845f).y,
-                    p(616f, 885f).x, p(616f, 885f).y,
-                    p(616f, 926f).x, p(616f, 926f).y
-                )
-            }
-
-            val measure = PathMeasure().apply {
-                setPath(
-                    path = tracePath,
-                    forceClosed = false
-                )
-            }
-
-            val visiblePath = Path()
-
-            measure.getSegment(
+            visibleOuter.reset()
+            outerMeasure.getSegment(
                 startDistance = 0f,
-                stopDistance =
-                    measure.length * pathProgress.value,
-                destination = visiblePath,
+                stopDistance = outerMeasure.length * outerProgress.value,
+                destination = visibleOuter,
                 startWithMoveTo = true
             )
 
-            /*
-             * Trace thickness is expressed in the original 1189 x 1037
-             * viewport and then uniformly scaled with the artwork.
-             *
-             * 46f gives a deliberate drawing stroke without trying to
-             * completely fill the final thick A.
-             */
-            drawPath(
-                path = visiblePath,
-                color = Color.Black.copy(
-                    alpha = traceAlpha.value
-                ),
-                style = Stroke(
-                    width = 46f * scale,
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round
-                )
+            visibleInner.reset()
+            innerMeasure.getSegment(
+                startDistance = 0f,
+                stopDistance = innerMeasure.length * innerProgress.value,
+                destination = visibleInner,
+                startWithMoveTo = true
             )
+            translate(left = offsetX, top = offsetY) {
+                scale(scale = scaleFactor, pivot = Offset.Zero) {
+                    val strokeStyle = Stroke(
+                        width = 20f,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
 
-            /*
-             * Blue marker at the exact trace start.
-             * It stays still while the black path grows away from it.
-             */
-            drawCircle(
-                color = Color(0xFF169BFF).copy(
-                    alpha = startDotAlpha.value
-                ),
-                radius = 12f * scale,
-                center = p(
-                    123f,
-                    931f
-                )
-            )
+                    drawPath(
+                        path = visibleOuter,
+                        color = inkColor.copy(alpha = traceAlpha.value * strokeIntroAlpha.value),
+                        style = strokeStyle
+                    )
+
+                    drawPath(
+                        path = visibleInner,
+                        color = inkColor.copy(alpha = traceAlpha.value * strokeIntroAlpha.value),
+                        style = strokeStyle
+                    )
+                }
+            }
         }
 
         /*
          * FINAL VECTOR REVEAL
          *
          * clean_rebuild_full stays fully hidden during the trace and fades
-         * in only after the outer-A path reaches 100%.
-         *
-         * Because it uses the exact same 120.dp container and the Canvas
-         * uses FIT scaling against the real viewport, the trace and final
-         * artwork remain aligned.
+         * in only after both subpaths finish drawing.
          */
         Image(
-            painter = painterResource(
-                R.drawable.clean_rebuild_full
-            ),
+            painter = painterResource(R.drawable.clean_rebuild_full),
             contentDescription = null,
+            colorFilter = if (isDarkTheme) ColorFilter.tint(Color.White) else null,
             modifier = Modifier
                 .size(splashLogoSize)
-                .graphicsLayer {
-                    alpha = logoAlpha.value
-                }
+                .graphicsLayer { alpha = logoAlpha.value }
         )
     }
 }

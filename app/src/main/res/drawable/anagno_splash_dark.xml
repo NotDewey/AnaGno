@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/clean_rebuild_full_white"
+    android:insetLeft="84dp"
+    android:insetTop="84dp"
+    android:insetRight="84dp"
+    android:insetBottom="84dp" />

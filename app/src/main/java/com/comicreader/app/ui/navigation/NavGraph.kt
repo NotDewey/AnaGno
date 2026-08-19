@@ -37,7 +37,6 @@ import com.comicreader.app.ui.collections.CollectionsScreen
 import com.comicreader.app.ui.components.ComicReaderBottomBar
 import com.comicreader.app.ui.components.ComicReaderNavigationRail
 import com.comicreader.app.ui.components.ContextualDockAction
-import com.comicreader.app.ui.home.HomeScreen
 import com.comicreader.app.ui.haptics.AppHaptics
 import com.comicreader.app.ui.layout.AdaptiveContentFrame
 import com.comicreader.app.ui.layout.ProvideAppLayoutInfo
@@ -49,8 +48,6 @@ import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.haze
 
 private object Routes {
-    const val HOME =
-        "home"
     const val LIBRARY =
         "library"
     const val COLLECTIONS =
@@ -67,7 +64,6 @@ private object Routes {
 
     val bottomNavRoutes =
         setOf(
-            HOME,
             LIBRARY,
             COLLECTIONS,
             RATINGS
@@ -261,7 +257,7 @@ fun ComicReaderNavHost(
                         navController =
                             navController,
                         startDestination =
-                            Routes.HOME,
+                            Routes.LIBRARY,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(
@@ -271,21 +267,6 @@ fun ComicReaderNavHost(
                                 contentPadding
                             )
                     ) {
-                        composable(
-                            Routes.HOME
-                        ) {
-                            AdaptiveContentFrame {
-                                HomeScreen(
-                                    onComicClick = {
-                                            comic ->
-                                        openComic(
-                                            comic.id
-                                        )
-                                    }
-                                )
-                            }
-                        }
-
                         composable(
                             Routes.LIBRARY
                         ) {

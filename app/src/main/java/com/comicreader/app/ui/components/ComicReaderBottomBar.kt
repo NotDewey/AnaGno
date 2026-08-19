@@ -25,11 +25,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CollectionsBookmark
-import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
@@ -79,12 +77,6 @@ data class ContextualDockAction(
 
 val bottomNavItems =
     listOf(
-        BottomNavItem(
-            "home",
-            "Home",
-            Icons.Outlined.Home,
-            Icons.Filled.Home
-        ),
         BottomNavItem(
             "library",
             "Library",
@@ -930,7 +922,7 @@ private fun lerpDockDp(
     )
 
 @Composable
-private fun GlassNavigationSurface(
+fun GlassNavigationSurface(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
     accented: Boolean = false,

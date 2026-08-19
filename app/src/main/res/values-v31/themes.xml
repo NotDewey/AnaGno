@@ -6,11 +6,11 @@
         parent="android:Theme.Material.Light.NoActionBar">
 
         <item name="android:windowSplashScreenBackground">
-            @android:color/white
+            @android:color/black
         </item>
 
         <item name="android:windowSplashScreenAnimatedIcon">
-            @drawable/splash_transparent
+            @drawable/anagno_splash_dark
         </item>
 
         <item name="android:windowSplashScreenIconBackgroundColor">

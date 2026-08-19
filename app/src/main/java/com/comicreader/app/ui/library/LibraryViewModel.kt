@@ -19,11 +19,22 @@ import javax.inject.Inject
 
 data class LibraryUiState(
     val comics: List<Comic> = emptyList(),
+    val currentlyReading: List<Comic> = emptyList(),
+    val totalLibraryCount: Int = 0,
+    val totalReadingCount: Int = 0,
     val isImporting: Boolean = false,
     val importProgress: Float? = null,
     val searchQuery: String = "",
     val panelProgress: Map<Long, PanelAnalysisProgress> = emptyMap(),
     val errorMessage: String? = null
+)
+
+private data class LibraryContent(
+    val comics: List<Comic>,
+    val currentlyReading: List<Comic>,
+    val totalLibraryCount: Int,
+    val totalReadingCount: Int,
+    val panelProgress: Map<Long, PanelAnalysisProgress>
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -41,26 +52,61 @@ class LibraryViewModel @Inject constructor(
         if (query.isBlank()) repository.observeLibrary() else repository.search(query)
     }
 
+    private val currentlyReadingFlow = combine(
+        repository.observeCurrentlyReading(),
+        searchQuery
+    ) { comics, query ->
+        val cleanQuery = query.trim()
+
+        if (cleanQuery.isEmpty()) {
+            comics
+        } else {
+            comics.filter { comic ->
+                comic.title.contains(cleanQuery, ignoreCase = true) ||
+                        comic.series?.contains(cleanQuery, ignoreCase = true) == true
+            }
+        }
+    }
+
     private val libraryContent = combine(
         comicsFlow,
+        currentlyReadingFlow,
+        repository.observeLibrary(),
+        repository.observeCurrentlyReading(),
         repository.observePanelProgress()
-    ) { comics, progress ->
-        comics to progress.associateBy(PanelAnalysisProgress::comicId)
+    ) { comics, currentlyReading, fullLibrary, fullReading, progress ->
+        LibraryContent(
+            comics = comics,
+            currentlyReading = currentlyReading,
+            totalLibraryCount = fullLibrary.size,
+            totalReadingCount = fullReading.size,
+            panelProgress = progress.associateBy(PanelAnalysisProgress::comicId)
+        )
     }
 
     val uiState: StateFlow<LibraryUiState> = combine(
-        libraryContent, searchQuery, isImporting, importProgress, errorMessage
+        libraryContent,
+        searchQuery,
+        isImporting,
+        importProgress,
+        errorMessage
     ) { content, query, importing, progress, error ->
-        val (comics, panelProgress) = content
         LibraryUiState(
-            comics = comics,
+            comics = content.comics,
+            currentlyReading = content.currentlyReading,
+            totalLibraryCount = content.totalLibraryCount,
+            totalReadingCount = content.totalReadingCount,
             isImporting = importing,
             importProgress = progress,
             searchQuery = query,
-            panelProgress = panelProgress,
+            panelProgress = content.panelProgress,
             errorMessage = error
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LibraryUiState())
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        LibraryUiState()
+    )
 
     init {
         viewModelScope.launch { repository.resumeLastOpenedPanelDetection() }
@@ -73,9 +119,11 @@ class LibraryViewModel @Inject constructor(
     /** Called with URIs returned from the SAF "open document(s)" picker. */
     fun importComicFiles(uris: List<Uri>) {
         if (uris.isEmpty()) return
+
         viewModelScope.launch {
             isImporting.value = true
             importProgress.value = 0f
+
             try {
                 repository.importMultiple(uris) { progress ->
                     importProgress.value = progress
@@ -103,6 +151,7 @@ class LibraryViewModel @Inject constructor(
 
     fun deleteComics(comics: List<Comic>) {
         if (comics.isEmpty()) return
+
         viewModelScope.launch {
             try {
                 comics.forEach { repository.deleteComic(it) }
@@ -118,6 +167,26 @@ class LibraryViewModel @Inject constructor(
                 repository.renameComic(comic.id, newTitle)
             } catch (error: Exception) {
                 errorMessage.value = "Couldn't rename: ${error.message ?: error::class.simpleName}"
+            }
+        }
+    }
+
+    fun markFinished(comics: List<Comic>) {
+        if (comics.isEmpty()) return
+
+        viewModelScope.launch {
+            comics.forEach { comic ->
+                repository.markFinished(comic.id)
+            }
+        }
+    }
+
+    fun removeFromContinueReading(comics: List<Comic>) {
+        if (comics.isEmpty()) return
+
+        viewModelScope.launch {
+            comics.forEach { comic ->
+                repository.removeFromCurrentlyReading(comic.id)
             }
         }
     }

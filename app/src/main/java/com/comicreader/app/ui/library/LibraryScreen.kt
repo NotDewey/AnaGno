@@ -2,13 +2,22 @@ package com.comicreader.app.ui.library
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -16,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,20 +34,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
-import kotlin.math.floor
-import kotlin.math.max
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
@@ -45,28 +59,53 @@ import com.comicreader.app.domain.model.Comic
 import com.comicreader.app.domain.model.PanelAnalysisProgress
 import com.comicreader.app.ui.components.ContextualDockAction
 import com.comicreader.app.ui.components.TopSearchBar
-import androidx.compose.foundation.background
+import com.comicreader.app.ui.components.comicReaderDockShade
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.roundToInt
+
+private const val EDIT_NONE = "none"
+private const val EDIT_LIBRARY = "library"
+private const val EDIT_CONTINUE_READING = "continue_reading"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
     onComicClick: (Comic) -> Unit,
-    onContextualActionChanged:
-        (ContextualDockAction?) -> Unit,
+    onContextualActionChanged: (ContextualDockAction?) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    var isEditing by rememberSaveable { mutableStateOf(false) }
+
+    var editMode by rememberSaveable { mutableStateOf(EDIT_NONE) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var renameTarget by remember { mutableStateOf<Comic?>(null) }
     var renameText by remember { mutableStateOf("") }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
-    val selectedComics = state.comics.filter { it.id in selectedIds }
+    var showRemoveFromContinueConfirmation by remember { mutableStateOf(false) }
+    var showFinishConfirmation by remember { mutableStateOf(false) }
+
+    val isLibraryEditing = editMode == EDIT_LIBRARY
+    val isContinueReadingEditing = editMode == EDIT_CONTINUE_READING
+    val isEditing = editMode != EDIT_NONE
+
+    val selectedLibraryComics = state.comics.filter { it.id in selectedIds }
+    val selectedContinueReadingComics = state.currentlyReading.filter { it.id in selectedIds }
 
     fun leaveEditMode() {
-        isEditing = false
+        editMode = EDIT_NONE
         selectedIds = emptySet()
+    }
+
+    fun enterLibraryEditMode(comicId: Long? = null) {
+        editMode = EDIT_LIBRARY
+        selectedIds = comicId?.let(::setOf) ?: emptySet()
+    }
+
+    fun enterContinueReadingEditMode(comicId: Long) {
+        editMode = EDIT_CONTINUE_READING
+        selectedIds = setOf(comicId)
     }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -77,21 +116,16 @@ fun LibraryScreen(
         !isEditing &&
                 !state.isImporting &&
                 renameTarget == null &&
-                !showDeleteConfirmation
+                !showDeleteConfirmation &&
+                !showRemoveFromContinueConfirmation &&
+                !showFinishConfirmation
 
-    LaunchedEffect(
-        canShowContextualAction,
-        onContextualActionChanged
-    ) {
+    LaunchedEffect(canShowContextualAction, onContextualActionChanged) {
         onContextualActionChanged(
-            if (
-                canShowContextualAction
-            ) {
+            if (canShowContextualAction) {
                 ContextualDockAction(
-                    route =
-                        "library",
-                    contentDescription =
-                        "Import comic",
+                    route = "library",
+                    contentDescription = "Import comic",
                     onClick = {
                         importLauncher.launch(
                             arrayOf(
@@ -113,9 +147,7 @@ fun LibraryScreen(
         )
     }
 
-    // The ViewModel survives tab switches (that's what keeps scroll position / avoids
-    // re-fetching on the bottom nav), so searchQuery would otherwise persist too.
-    // Reset it explicitly on every fresh entry to this screen instead.
+    // The ViewModel survives tab switches, so clear a stale search on a fresh entry.
     LaunchedEffect(Unit) {
         viewModel.onSearchQueryChanged("")
     }
@@ -127,9 +159,22 @@ fun LibraryScreen(
         }
     }
 
-    LaunchedEffect(state.comics.map(Comic::id)) {
-        selectedIds = selectedIds.intersect(state.comics.map(Comic::id).toSet())
-        if (isEditing && state.comics.isEmpty()) leaveEditMode()
+    LaunchedEffect(
+        state.comics.map(Comic::id),
+        state.currentlyReading.map(Comic::id),
+        editMode
+    ) {
+        val availableIds = when (editMode) {
+            EDIT_LIBRARY -> state.comics.map(Comic::id).toSet()
+            EDIT_CONTINUE_READING -> state.currentlyReading.map(Comic::id).toSet()
+            else -> emptySet()
+        }
+
+        selectedIds = selectedIds.intersect(availableIds)
+
+        if (isEditing && availableIds.isEmpty()) {
+            leaveEditMode()
+        }
     }
 
     renameTarget?.let { comic ->
@@ -172,11 +217,11 @@ fun LibraryScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirmation = false },
             title = {
-                Text(if (selectedComics.size == 1) "Remove comic?" else "Remove comics?")
+                Text(if (selectedLibraryComics.size == 1) "Remove comic?" else "Remove comics?")
             },
             text = {
                 Text(
-                    "Remove ${selectedComics.size} selected item${if (selectedComics.size == 1) "" else "s"} " +
+                    "Remove ${selectedLibraryComics.size} selected item${if (selectedLibraryComics.size == 1) "" else "s"} " +
                             "from the library? Saved progress, bookmarks, panels, and cached pages will be removed. " +
                             "The original CBZ, CBR, or PDF file will not be deleted."
                 )
@@ -184,7 +229,7 @@ fun LibraryScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteComics(selectedComics)
+                        viewModel.deleteComics(selectedLibraryComics)
                         showDeleteConfirmation = false
                         leaveEditMode()
                     }
@@ -192,6 +237,72 @@ fun LibraryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showRemoveFromContinueConfirmation) {
+        val itemCount = selectedContinueReadingComics.size
+
+        AlertDialog(
+            onDismissRequest = { showRemoveFromContinueConfirmation = false },
+            title = { Text("Remove from Continue Reading?") },
+            text = {
+                Text(
+                    if (itemCount == 1) {
+                        "This comic will leave Continue Reading, but it will stay in your Library and keep its saved page. Opening it again will return it to Continue Reading."
+                    } else {
+                        "These $itemCount comics will leave Continue Reading, but they will stay in your Library and keep their saved pages. Opening them again will return them to Continue Reading."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeFromContinueReading(selectedContinueReadingComics)
+                        showRemoveFromContinueConfirmation = false
+                        leaveEditMode()
+                    },
+                    enabled = selectedContinueReadingComics.isNotEmpty()
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveFromContinueConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showFinishConfirmation) {
+        val itemCount = selectedContinueReadingComics.size
+
+        AlertDialog(
+            onDismissRequest = { showFinishConfirmation = false },
+            title = {
+                Text(if (itemCount == 1) "Mark comic as finished?" else "Mark comics as finished?")
+            },
+            text = {
+                Text(
+                    if (itemCount == 1) {
+                        "It will leave Continue Reading and its Library cover will become black and white. You can rate it later."
+                    } else {
+                        "These $itemCount comics will leave Continue Reading and their Library covers will become black and white. You can rate them later."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.markFinished(selectedContinueReadingComics)
+                        showFinishConfirmation = false
+                        leaveEditMode()
+                    },
+                    enabled = selectedContinueReadingComics.isNotEmpty()
+                ) { Text("Mark finished") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFinishConfirmation = false }) { Text("Cancel") }
             }
         )
     }
@@ -207,34 +318,57 @@ fun LibraryScreen(
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = {
-                                selectedComics.singleOrNull()?.let {
-                                    renameTarget = it
-                                    renameText = it.title
-                                }
-                            },
-                            enabled = selectedComics.size == 1
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = "Rename selected comic")
-                        }
-                        IconButton(
-                            onClick = { showDeleteConfirmation = true },
-                            enabled = selectedComics.isNotEmpty()
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove selected comics")
+                        if (isContinueReadingEditing) {
+                            IconButton(
+                                onClick = { showFinishConfirmation = true },
+                                enabled = selectedContinueReadingComics.isNotEmpty()
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Mark selected comics as finished"
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showRemoveFromContinueConfirmation = true },
+                                enabled = selectedContinueReadingComics.isNotEmpty()
+                            ) {
+                                Icon(
+                                    Icons.Default.RemoveCircleOutline,
+                                    contentDescription = "Remove selected comics from Continue Reading"
+                                )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = {
+                                    selectedLibraryComics.singleOrNull()?.let {
+                                        renameTarget = it
+                                        renameText = it.title
+                                    }
+                                },
+                                enabled = selectedLibraryComics.size == 1
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Rename selected comic")
+                            }
+
+                            IconButton(
+                                onClick = { showDeleteConfirmation = true },
+                                enabled = selectedLibraryComics.isNotEmpty()
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove selected comics")
+                            }
                         }
                     }
                 )
             }
         },
-        snackbarHost = {
-            SnackbarHost(
-                snackbarHostState
-            )
-        }
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
             if (!isEditing) {
                 TopSearchBar(
                     title = "Library",
@@ -243,17 +377,12 @@ fun LibraryScreen(
                     placeholder = "Search by title or series",
                     trailing = {
                         IconButton(
-                            onClick = {
-                                isEditing = true
-                            },
-                            enabled =
-                                state.comics.isNotEmpty()
+                            onClick = { enterLibraryEditMode() },
+                            enabled = state.comics.isNotEmpty()
                         ) {
                             Icon(
-                                imageVector =
-                                    Icons.Default.Tune,
-                                contentDescription =
-                                    "Manage library"
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Manage library"
                             )
                         }
                     }
@@ -272,59 +401,105 @@ fun LibraryScreen(
                 )
             }
 
-            if (state.comics.isEmpty() && !state.isImporting) {
+            if (state.totalLibraryCount == 0 && !state.isImporting) {
                 EmptyLibraryMessage()
             } else {
-                /*
-                 * Clip the scrolling viewport itself, rather than relying on
-                 * the rounded corners of the final row. This keeps the visible
-                 * lower edge rounded even when the grid is stopped halfway
-                 * through a comic cover.
-                 */
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 120.dp),
                     modifier = Modifier
                         .fillMaxSize()
-                        /*
-                         * The lower edge follows the same rounded silhouette
-                         * as each comic cover, column by column. This avoids
-                         * one large outer curve and prevents partially visible
-                         * covers from ending in a flat horizontal cut.
-                         */
-                        .clip(
-                            ComicGridBottomCurveShape()
-                        ),
+                        .clip(ComicGridBottomCurveShape()),
                     contentPadding = PaddingValues(
                         start = 8.dp,
-                        top = 8.dp,
+                        top = 6.dp,
                         end = 8.dp,
-                        /*
-                         * Lets the final row scroll completely above the
-                         * floating glass navigation dock.
-                         */
                         bottom = 112.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(state.comics, key = { it.id }) { comic ->
-                        ComicGridItem(
-                            comic = comic,
-                            panelProgress = state.panelProgress[comic.id]
-                                ?: PanelAnalysisProgress(comicId = comic.id),
-                            isEditing = isEditing,
-                            isSelected = comic.id in selectedIds,
-                            onClick = { onComicClick(comic) },
-                            onToggleSelection = {
-                                selectedIds = if (comic.id in selectedIds)
-                                    selectedIds - comic.id else selectedIds + comic.id
+                    if (state.currentlyReading.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SectionHeader(
+                                title = "Continue reading",
+                                count = if (state.searchQuery.isBlank()) {
+                                    state.totalReadingCount
+                                } else {
+                                    state.currentlyReading.size
+                                }
+                            )
+                        }
+
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            ContinueReadingRow(
+                                comics = state.currentlyReading,
+                                isEditing = isContinueReadingEditing,
+                                enabled = !isLibraryEditing,
+                                selectedIds = selectedIds,
+                                onComicClick = onComicClick,
+                                onToggleSelection = { comicId ->
+                                    selectedIds = if (comicId in selectedIds) {
+                                        selectedIds - comicId
+                                    } else {
+                                        selectedIds + comicId
+                                    }
+                                },
+                                onLongPress = { comicId ->
+                                    enterContinueReadingEditMode(comicId)
+                                }
+                            )
+                        }
+                    }
+
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SectionHeader(
+                            title = "All comics",
+                            count = if (state.searchQuery.isBlank()) {
+                                state.totalLibraryCount
+                            } else {
+                                state.comics.size
                             },
-                            onLongPress = {
-                                isEditing = true
-                                selectedIds = selectedIds + comic.id
-                            },
-                            onToggleFavorite = { viewModel.toggleFavorite(comic) }
+                            topPadding = if (state.currentlyReading.isNotEmpty()) 20.dp else 10.dp
                         )
+                    }
+
+                    if (state.comics.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp, vertical = 36.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No comics match your search.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        gridItems(state.comics, key = { it.id }) { comic ->
+                            ComicGridItem(
+                                comic = comic,
+                                panelProgress = state.panelProgress[comic.id]
+                                    ?: PanelAnalysisProgress(comicId = comic.id),
+                                isEditing = isLibraryEditing,
+                                isSelected = comic.id in selectedIds,
+                                enabled = !isContinueReadingEditing,
+                                onClick = { onComicClick(comic) },
+                                onToggleSelection = {
+                                    selectedIds = if (comic.id in selectedIds) {
+                                        selectedIds - comic.id
+                                    } else {
+                                        selectedIds + comic.id
+                                    }
+                                },
+                                onLongPress = { enterLibraryEditMode(comic.id) },
+                                onToggleFavorite = { viewModel.toggleFavorite(comic) }
+                            )
+                        }
                     }
                 }
             }
@@ -332,6 +507,273 @@ fun LibraryScreen(
     }
 }
 
+@Composable
+private fun SectionHeader(
+    title: String,
+    count: Int,
+    topPadding: androidx.compose.ui.unit.Dp = 10.dp
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 4.dp, top = topPadding, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun ContinueReadingRow(
+    comics: List<Comic>,
+    isEditing: Boolean,
+    enabled: Boolean,
+    selectedIds: Set<Long>,
+    onComicClick: (Comic) -> Unit,
+    onToggleSelection: (Long) -> Unit,
+    onLongPress: (Long) -> Unit
+) {
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        // Make every Continue Reading card consume the whole visible section width.
+        // The 8.dp subtraction matches the 4.dp content padding on both sides.
+        val cardWidth = (maxWidth - 8.dp).coerceAtLeast(0.dp)
+
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            lazyItems(comics, key = { it.id }) { comic ->
+                ContinueReadingCard(
+                    comic = comic,
+                    isEditing = isEditing,
+                    isSelected = comic.id in selectedIds,
+                    enabled = enabled,
+                    modifier = Modifier.width(cardWidth),
+                    onClick = { onComicClick(comic) },
+                    onToggleSelection = { onToggleSelection(comic.id) },
+                    onLongPress = { onLongPress(comic.id) }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ContinueReadingCard(
+    comic: Comic,
+    isEditing: Boolean,
+    isSelected: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onLongPress: () -> Unit
+) {
+    val progress = comic.readingProgress()
+    val currentPage = if (comic.pageCount > 0) {
+        comic.lastReadPage.coerceIn(0, comic.pageCount - 1) + 1
+    } else {
+        0
+    }
+    val pagesLeft = (comic.pageCount - currentPage).coerceAtLeast(0)
+    val cardShape = RoundedCornerShape(18.dp)
+    val coverShape = RoundedCornerShape(12.dp)
+    val dockShade = comicReaderDockShade()
+
+    Card(
+        modifier = modifier
+            .height(132.dp)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = {
+                    if (isEditing) onToggleSelection() else onClick()
+                },
+                onLongClick = onLongPress
+            )
+            .then(
+                if (isSelected) {
+                    Modifier.border(
+                        width = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = cardShape
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(
+            containerColor = dockShade
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(2f / 3f)
+            ) {
+                AsyncImage(
+                    model = comic.coverPagePath,
+                    contentDescription = comic.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(coverShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                )
+
+                if (isEditing) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelection() },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(0.dp)
+                    )
+                } else {
+                    ReadingProgressBadge(
+                        progress = progress,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = comic.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                )
+
+                Spacer(Modifier.height(7.dp))
+
+                Text(
+                    text = when {
+                        comic.pageCount <= 0 -> "Reading progress unavailable"
+                        pagesLeft == 1 -> "Page $currentPage of ${comic.pageCount} · 1 page left"
+                        else -> "Page $currentPage of ${comic.pageCount} · $pagesLeft pages left"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadingProgressBadge(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = spring(
+            dampingRatio = 0.82f,
+            stiffness = 420f
+        ),
+        label = "Reading progress donut"
+    )
+
+    val progressColor = MaterialTheme.colorScheme.primary
+
+    Surface(
+        modifier = modifier.size(38.dp),
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.70f),
+        shadowElevation = 4.dp
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val strokeWidth = 3.dp.toPx()
+                val radius = size.minDimension / 2f - strokeWidth / 2f
+
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.28f),
+                    radius = radius,
+                    center = Offset(
+                        size.width / 2f,
+                        size.height / 2f
+                    ),
+                    style = Stroke(width = strokeWidth)
+                )
+
+                drawArc(
+                    color = progressColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f * animatedProgress,
+                    useCenter = false,
+                    style = Stroke(
+                        width = strokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                )
+            }
+
+            Text(
+                text = "${(animatedProgress * 100f).roundToInt()}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+private fun Comic.readingProgress(): Float {
+    if (pageCount <= 0) return 0f
+
+    return (lastReadPage.coerceIn(0, pageCount - 1) + 1).toFloat() / pageCount.toFloat()
+}
 
 /**
  * Clips the bottom of the scrolling grid as a row of comic-card curves.
@@ -513,6 +955,7 @@ private fun ComicGridItem(
     panelProgress: PanelAnalysisProgress,
     isEditing: Boolean,
     isSelected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     onToggleSelection: () -> Unit,
     onLongPress: () -> Unit,
@@ -535,6 +978,7 @@ private fun ComicGridItem(
         modifier = Modifier
             .clip(MaterialTheme.shapes.medium)
             .combinedClickable(
+                enabled = enabled,
                 onClick = { if (isEditing) onToggleSelection() else onClick() },
                 onLongClick = onLongPress
             )
@@ -580,7 +1024,11 @@ private fun ComicGridItem(
                     modifier = Modifier.align(Alignment.TopStart)
                 )
             } else {
-                IconButton(onClick = onToggleFavorite, modifier = Modifier.align(Alignment.TopEnd)) {
+                IconButton(
+                    onClick = onToggleFavorite,
+                    enabled = enabled,
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
                     Icon(
                         imageVector = if (comic.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favorite",
