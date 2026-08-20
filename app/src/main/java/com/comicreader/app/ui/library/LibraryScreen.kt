@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyItems
@@ -76,6 +77,8 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val sortOption by viewModel.sortOption.collectAsState()
+    val sortDescending by viewModel.sortDescending.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var editMode by rememberSaveable { mutableStateOf(EDIT_NONE) }
@@ -85,6 +88,7 @@ fun LibraryScreen(
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showRemoveFromContinueConfirmation by remember { mutableStateOf(false) }
     var showFinishConfirmation by remember { mutableStateOf(false) }
+    var showSortSheet by rememberSaveable { mutableStateOf(false) }
 
     val isLibraryEditing = editMode == EDIT_LIBRARY
     val isContinueReadingEditing = editMode == EDIT_CONTINUE_READING
@@ -307,6 +311,72 @@ fun LibraryScreen(
         )
     }
 
+    if (showSortSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSortSheet = false }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 28.dp)
+            ) {
+                Text(
+                    text = "Sort comics",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+
+                LibrarySortOption.values().forEach { option ->
+                    ListItem(
+                        headlineContent = { Text(option.label) },
+                        leadingContent = {
+                            RadioButton(
+                                selected = sortOption == option,
+                                onClick = null
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setSortOption(option) }
+                    )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                Text(
+                    text = "Order",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+
+                val labels = sortOrderLabels(sortOption)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FilterChip(
+                        selected = !sortDescending,
+                        onClick = { viewModel.setSortDescending(false) },
+                        label = { Text(labels.first) }
+                    )
+
+                    FilterChip(
+                        selected = sortDescending,
+                        onClick = { viewModel.setSortDescending(true) },
+                        label = { Text(labels.second) }
+                    )
+                }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             if (isEditing) {
@@ -339,6 +409,12 @@ fun LibraryScreen(
                                 )
                             }
                         } else {
+                            TextButton(
+                                onClick = { showSortSheet = true }
+                            ) {
+                                Text("Sort")
+                            }
+
                             IconButton(
                                 onClick = {
                                     selectedLibraryComics.singleOrNull()?.let {
@@ -506,6 +582,19 @@ fun LibraryScreen(
         }
     }
 }
+
+private fun sortOrderLabels(
+    option: LibrarySortOption
+): Pair<String, String> =
+    when (option) {
+        LibrarySortOption.DATE_ADDED -> "Oldest first" to "Newest first"
+        LibrarySortOption.TITLE -> "A → Z" to "Z → A"
+        LibrarySortOption.LAST_OPENED -> "Least recent" to "Most recent"
+        LibrarySortOption.READING_PROGRESS -> "Least progress" to "Most progress"
+        LibrarySortOption.PAGE_COUNT -> "Fewest pages" to "Most pages"
+        LibrarySortOption.FILE_SIZE -> "Smallest first" to "Largest first"
+        LibrarySortOption.RATING -> "Lowest rated" to "Highest rated"
+    }
 
 @Composable
 private fun SectionHeader(
