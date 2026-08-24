@@ -1,0 +1,4 @@
+ultralytics>=8.3,<9
+onnx>=1.16,<2
+onnxruntime>=1.20,<2
+numpy>=1.26,<3

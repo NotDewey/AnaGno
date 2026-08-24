@@ -146,6 +146,7 @@ class LibraryViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.resumeLastOpenedPanelDetection()
+            repository.resumeLastOpenedBubbleDetection()
         }
 
         viewModelScope.launch {

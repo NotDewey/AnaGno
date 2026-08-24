@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.util.Log
+import com.comicreader.app.data.bubble.BubbleDetectionContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -3079,7 +3080,14 @@ private fun ZoomablePage(
     }
 }
 
-private data class BubbleFrame(val left: Dp, val top: Dp, val width: Dp, val height: Dp)
+private data class BubbleFrame(
+    val left: Dp,
+    val top: Dp,
+    val width: Dp,
+    val height: Dp,
+    val scale: Float,
+    val wasShrunkToFit: Boolean
+)
 
 private fun computeBubbleFrame(
     bubble: Bubble,
@@ -3088,21 +3096,30 @@ private fun computeBubbleFrame(
 ): BubbleFrame {
     val sourceWidth = (pageWidth * (bubble.right - bubble.left)).coerceAtLeast(20.dp)
     val sourceHeight = (pageHeight * (bubble.bottom - bubble.top)).coerceAtLeast(16.dp)
-    val maximumWidth = containerWidth * 0.86f
-    val maximumHeight = containerHeight * 0.48f
+    val margin = 8.dp
+    val availableWidth = (containerWidth - margin * 2).coerceAtLeast(1.dp)
+    val availableHeight = (containerHeight - margin * 2).coerceAtLeast(1.dp)
+    val maximumWidth = minOf(containerWidth * 0.86f, availableWidth)
+    val maximumHeight = minOf(containerHeight * 0.48f, availableHeight)
     val magnification = minOf(
         2f,
         maximumWidth.value / sourceWidth.value,
         maximumHeight.value / sourceHeight.value
-    ).coerceAtLeast(1f)
+    ).coerceAtLeast(0.01f)
     val width = sourceWidth * magnification
     val height = sourceHeight * magnification
     val centerX = pageLeft + pageWidth * ((bubble.left + bubble.right) / 2f)
     val centerY = pageTop + pageHeight * ((bubble.top + bubble.bottom) / 2f)
-    val margin = 8.dp
     val left = (centerX - width / 2f).coerceIn(margin, (containerWidth - width - margin).coerceAtLeast(margin))
     val top = (centerY - height / 2f).coerceIn(margin, (containerHeight - height - margin).coerceAtLeast(margin))
-    return BubbleFrame(left, top, width, height)
+    return BubbleFrame(
+        left = left,
+        top = top,
+        width = width,
+        height = height,
+        scale = magnification,
+        wasShrunkToFit = magnification < 1f
+    )
 }
 
 @Composable
@@ -3133,6 +3150,16 @@ private fun BubbleMagnifier(
         containerHeight
     ) {
         computeBubbleFrame(bubble, pageWidth, pageHeight, pageLeft, pageTop, containerWidth, containerHeight)
+    }
+
+    LaunchedEffect(frame, bubble.maskPath) {
+        Log.d(
+            BubbleDetectionContract.DIAGNOSTIC_TAG,
+            "stage=MASK_FRAME outcome=FIT page=${bubble.pageIndex} order=${bubble.order} " +
+                    "scale=${"%.3f".format(frame.scale)} shrunk=${frame.wasShrunkToFit} " +
+                    "frame=${frame.left.value.toInt()},${frame.top.value.toInt()}," +
+                    "${frame.width.value.toInt()}x${frame.height.value.toInt()}"
+        )
     }
 
     // NOT keyed on bubble.id — same Animatables persist across bubble changes,
@@ -3178,7 +3205,7 @@ private fun BubbleMagnifier(
             displayedPath = targetPath
             contentAlpha.snapTo(0f)
             Log.d(
-                "BubbleZoomV32",
+                BubbleDetectionContract.DIAGNOSTIC_TAG,
                 "stage=MASK_DISPLAY outcome=COMMITTED page=${bubble.pageIndex} " +
                         "order=${bubble.order} text=\"${bubble.text.replace('\n', ' ')}\""
             )
@@ -3197,7 +3224,10 @@ private fun BubbleMagnifier(
         SubcomposeAsyncImage(
             model = displayedPath,
             contentDescription = "Enlarged speech balloon",
-            contentScale = ContentScale.FillBounds,
+            // Preserve the native PNG aspect ratio. A mismatched database
+            // bound may leave a little empty room, but it can no longer
+            // stretch or crop the bubble to fill the animation frame.
+            contentScale = ContentScale.Fit,
             filterQuality = FilterQuality.High,
             modifier = Modifier
                 .fillMaxSize()

@@ -3,6 +3,11 @@ package com.comicreader.app.data.repository
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
+import com.comicreader.app.data.bubble.BubbleDetectionContract
+import com.comicreader.app.data.bubble.BubbleDetectionScheduler
+import com.comicreader.app.data.bubble.BubbleDetector
+import com.comicreader.app.data.bubble.BubblePageStatus
 import com.comicreader.app.data.cbz.CbzExtractor
 import com.comicreader.app.data.comic.ComicContentManager
 import com.comicreader.app.data.comic.ComicPageRef
@@ -13,6 +18,7 @@ import com.comicreader.app.data.local.dao.PanelDao
 import com.comicreader.app.data.local.entities.toDomain
 import com.comicreader.app.data.local.entities.toEntity
 import com.comicreader.app.data.local.entities.PanelPageStateEntity
+import com.comicreader.app.data.local.entities.BubblePageStateEntity
 import com.comicreader.app.data.panel.PanelDetectionScheduler
 import com.comicreader.app.data.panel.PanelDetector
 import com.comicreader.app.domain.model.Bookmark
@@ -27,8 +33,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -43,6 +52,8 @@ class ComicRepository @Inject constructor(
 ) {
 
     private val content = ComicContentManager(context, extractor)
+    private val bubbleDetectionLocks = ConcurrentHashMap<String, Mutex>()
+    private val backgroundAnalysisMutex = Mutex()
 
     fun observeLibrary(): Flow<List<Comic>> =
         comicDao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -232,6 +243,7 @@ class ComicRepository @Inject constructor(
 
     suspend fun deleteComic(comic: Comic) {
         PanelDetectionScheduler.cancel(context, comic.id)
+        BubbleDetectionScheduler.cancel(context, comic.id)
         comicDao.delete(comic.toEntity())
         content.clearComic(sha1(comic.uri))
         File(context.filesDir, "bubble_masks/${comic.id}").deleteRecursively()
@@ -262,6 +274,159 @@ class ComicRepository @Inject constructor(
             ).toEntity()
         }
         bubbleDao.replaceForPage(comicId, pageIndex, normalized)
+    }
+
+    /**
+     * Returns null when a page still needs work, an empty list for a completed
+     * no-dialogue page, or ready-to-display bubbles when indexing is complete.
+     */
+    suspend fun getIndexedBubbles(
+        comicId: Long,
+        pageIndex: Int,
+        requireEvidence: Boolean = false
+    ): List<Bubble>? = withContext(Dispatchers.IO) {
+        if (requireEvidence && !hasBubbleEvidence(comicId, pageIndex)) {
+            return@withContext null
+        }
+        val state = bubbleDao.getState(comicId, pageIndex) ?: return@withContext null
+        if (state.maskVersion != BubbleDetectionContract.MASK_VERSION) {
+            return@withContext null
+        }
+        if (state.status == BubblePageStatus.EMPTY.name) return@withContext emptyList()
+        if (state.status != BubblePageStatus.READY.name) return@withContext null
+
+        val saved = bubbleDao.getForPage(comicId, pageIndex)
+            .map { it.toDomain() }
+            .filter { bubble ->
+                bubble.maskPath.isNotBlank() &&
+                        File(bubble.maskPath).isFile &&
+                        File(bubble.maskPath).name.startsWith(
+                            BubbleDetectionContract.MASK_VERSION
+                        )
+            }
+        saved.takeIf { it.size == state.bubbleCount }
+    }
+
+    /**
+     * Shared interactive/background entry point. The per-page mutex prevents a
+     * Bubble Zoom tap from duplicating work already running in the indexer.
+     */
+    suspend fun getOrDetectBubbles(
+        comic: Comic,
+        pageIndex: Int,
+        pagePath: String,
+        detector: BubbleDetector,
+        forceDetection: Boolean = false,
+        exportEvidence: Boolean = false
+    ): List<Bubble> = withContext(Dispatchers.IO) {
+        val lockKey = "${comic.id}:$pageIndex"
+        val lock = bubbleDetectionLocks.computeIfAbsent(lockKey) { Mutex() }
+        lock.withLock {
+            val state = bubbleDao.getState(comic.id, pageIndex)
+            val saved = bubbleDao.getForPage(comic.id, pageIndex)
+                .map { it.toDomain() }
+                .filter { bubble ->
+                    bubble.maskPath.isNotBlank() &&
+                            File(bubble.maskPath).isFile &&
+                            File(bubble.maskPath).name.startsWith(
+                                BubbleDetectionContract.MASK_VERSION
+                            )
+                }
+
+            if (!forceDetection) {
+                val currentState = state?.maskVersion == BubbleDetectionContract.MASK_VERSION
+                if (currentState && state?.status == BubblePageStatus.EMPTY.name &&
+                    (!exportEvidence || hasBubbleEvidence(comic.id, pageIndex))
+                ) {
+                    return@withLock emptyList()
+                }
+                if (saved.isNotEmpty() &&
+                    (!exportEvidence || hasBubbleEvidence(comic.id, pageIndex))
+                ) {
+                    if (!currentState || state?.status != BubblePageStatus.READY.name) {
+                        bubbleDao.upsertState(
+                            BubblePageStateEntity(
+                                comicId = comic.id,
+                                pageIndex = pageIndex,
+                                status = BubblePageStatus.READY.name,
+                                maskVersion = BubbleDetectionContract.MASK_VERSION,
+                                bubbleCount = saved.size
+                            )
+                        )
+                    }
+                    return@withLock saved
+                }
+            }
+
+            bubbleDao.upsertState(
+                BubblePageStateEntity(
+                    comicId = comic.id,
+                    pageIndex = pageIndex,
+                    status = BubblePageStatus.PROCESSING.name,
+                    maskVersion = BubbleDetectionContract.MASK_VERSION
+                )
+            )
+
+            try {
+                val detected = detector.detect(
+                    pagePath = pagePath,
+                    comicId = comic.id,
+                    pageIndex = pageIndex,
+                    exportEvidence = exportEvidence
+                )
+                val normalized = detected.mapIndexed { index, bubble ->
+                    bubble.copy(
+                        id = 0,
+                        comicId = comic.id,
+                        pageIndex = pageIndex,
+                        order = index,
+                        left = bubble.left.coerceIn(0f, 1f),
+                        top = bubble.top.coerceIn(0f, 1f),
+                        right = bubble.right.coerceIn(0f, 1f),
+                        bottom = bubble.bottom.coerceIn(0f, 1f)
+                    ).toEntity()
+                }
+                bubbleDao.replaceIndexedPage(
+                    comicId = comic.id,
+                    pageIndex = pageIndex,
+                    bubbles = normalized,
+                    state = BubblePageStateEntity(
+                        comicId = comic.id,
+                        pageIndex = pageIndex,
+                        status = if (detected.isEmpty()) {
+                            BubblePageStatus.EMPTY.name
+                        } else {
+                            BubblePageStatus.READY.name
+                        },
+                        maskVersion = BubbleDetectionContract.MASK_VERSION,
+                        bubbleCount = detected.size
+                    )
+                )
+                detected
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                bubbleDao.upsertState(
+                    BubblePageStateEntity(
+                        comicId = comic.id,
+                        pageIndex = pageIndex,
+                        status = BubblePageStatus.FAILED.name,
+                        maskVersion = BubbleDetectionContract.MASK_VERSION,
+                        errorMessage = error.message ?: "Bubble detection failed"
+                    )
+                )
+                throw error
+            }
+        }
+    }
+
+    private fun hasBubbleEvidence(comicId: Long, pageIndex: Int): Boolean {
+        val root = context.getExternalFilesDir(null) ?: context.filesDir
+        return File(
+            root,
+            "${BubbleDetectionContract.EVIDENCE_DIRECTORY}/comic_$comicId/" +
+                    "page_$pageIndex/${BubbleDetectionContract.EVIDENCE_COMPLETE_FILE}"
+        ).isFile
     }
 
     suspend fun getPanels(comicId: Long, pageIndex: Int): List<Panel> =
@@ -303,6 +468,96 @@ class ComicRepository @Inject constructor(
             if (comic.id == lastOpened?.id) PanelDetectionScheduler.enqueue(context, comic.id)
             else PanelDetectionScheduler.cancel(context, comic.id)
         }
+    }
+
+    /** Makes this the only comic being Bubble Zoom indexed in the background. */
+    suspend fun activateBubbleDetection(comicId: Long) = withContext(Dispatchers.IO) {
+        val comics = comicDao.getAll()
+        comics.forEach { comic ->
+            if (comic.id == comicId) BubbleDetectionScheduler.enqueue(context, comic.id)
+            else BubbleDetectionScheduler.cancel(context, comic.id)
+        }
+    }
+
+    /** Resumes the most recently opened comic after the library/app restarts. */
+    suspend fun resumeLastOpenedBubbleDetection() = withContext(Dispatchers.IO) {
+        val comics = comicDao.getAll()
+        val lastOpened = comics
+            .filter { it.dateLastOpened != null }
+            .maxByOrNull { it.dateLastOpened ?: Long.MIN_VALUE }
+        comics.forEach { comic ->
+            if (comic.id == lastOpened?.id) BubbleDetectionScheduler.enqueue(context, comic.id)
+            else BubbleDetectionScheduler.cancel(context, comic.id)
+        }
+    }
+
+    /**
+     * Processes a deliberately small batch. Each continuation reloads the
+     * comic's last-read page, so navigation automatically reprioritizes the
+     * current page and the pages immediately ahead of it.
+     */
+    suspend fun detectNextBubbleBatch(
+        comicId: Long,
+        detector: BubbleDetector,
+        batchSize: Int = 2
+    ): Boolean = withContext(Dispatchers.IO) {
+        val comic = getComic(comicId) ?: return@withContext false
+        val pages = getPageRefs(comic)
+        if (pages.isEmpty()) return@withContext false
+
+        val states = bubbleDao.getStatesForComic(comicId).associateBy { it.pageIndex }
+        val finished = setOf(
+            BubblePageStatus.READY.name,
+            BubblePageStatus.EMPTY.name,
+            BubblePageStatus.FAILED.name
+        )
+        val current = comic.lastReadPage.coerceIn(0, pages.lastIndex)
+        val priority = buildList {
+            add(current)
+            for (distance in 1..8) add(current + distance)
+            for (distance in 1..2) add(current - distance)
+            addAll(pages.indices)
+        }.distinct().filter { it in pages.indices }
+
+        val pending = priority.filter { pageIndex ->
+            val state = states[pageIndex]
+            state?.maskVersion != BubbleDetectionContract.MASK_VERSION ||
+                    state?.status !in finished
+        }
+
+        pending.take(batchSize).forEach { pageIndex ->
+            backgroundAnalysisMutex.withLock {
+                try {
+                    val pagePath = loadPage(comic, pages[pageIndex])
+                    val bubbles = getOrDetectBubbles(
+                        comic = comic,
+                        pageIndex = pageIndex,
+                        pagePath = pagePath,
+                        detector = detector
+                    )
+                    Log.d(
+                        BubbleDetectionContract.INDEX_TAG,
+                        "stage=INDEX_PAGE outcome=READY comic=$comicId page=$pageIndex bubbles=${bubbles.size}"
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(
+                        BubbleDetectionContract.INDEX_TAG,
+                        "stage=INDEX_PAGE outcome=FAILED comic=$comicId page=$pageIndex",
+                        error
+                    )
+                }
+            }
+        }
+        val hasMore = pending.size > batchSize
+        if (!hasMore) {
+            File(context.filesDir, "bubble_masks/$comicId")
+                .listFiles()
+                ?.filterNot { it.name.startsWith(BubbleDetectionContract.MASK_VERSION) }
+                ?.forEach { it.delete() }
+        }
+        hasMore
     }
 
     suspend fun savePanels(comicId: Long, pageIndex: Int, panels: List<Panel>) {
@@ -348,36 +603,39 @@ class ComicRepository @Inject constructor(
 
         val pending = priority.filter { states[it]?.status !in finished }
         pending.take(batchSize).forEach { pageIndex ->
-            if (!panelDao.beginDetectionUnlessManual(comicId, pageIndex)) return@forEach
-            try {
-                val pagePath = loadPage(comic, pages[pageIndex])
-                val detected = detector.detect(pagePath, comicId, pageIndex)
-                val status = when {
-                    detected.isEmpty() -> PanelPageStatus.FAILED
-                    detected.looksSuspicious() -> PanelPageStatus.NEEDS_REVIEW
-                    else -> PanelPageStatus.AI_DETECTED
+            backgroundAnalysisMutex.withLock {
+                if (panelDao.beginDetectionUnlessManual(comicId, pageIndex)) {
+                    try {
+                        val pagePath = loadPage(comic, pages[pageIndex])
+                        val detected = detector.detect(pagePath, comicId, pageIndex)
+                        val status = when {
+                            detected.isEmpty() -> PanelPageStatus.FAILED
+                            detected.looksSuspicious() -> PanelPageStatus.NEEDS_REVIEW
+                            else -> PanelPageStatus.AI_DETECTED
+                        }
+                        val entities = detected.map { it.copy(id = 0).toEntity() }
+                        panelDao.replaceDetectedUnlessManual(
+                            comicId = comicId,
+                            pageIndex = pageIndex,
+                            panels = entities,
+                            finalState = PanelPageStateEntity(
+                                comicId = comicId,
+                                pageIndex = pageIndex,
+                                status = status.name,
+                                panelCount = entities.size,
+                                errorMessage = if (detected.isEmpty()) "No panels detected" else null
+                            )
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        panelDao.markFailedUnlessManual(
+                            comicId,
+                            pageIndex,
+                            error.message ?: "Page analysis failed"
+                        )
+                    }
                 }
-                val entities = detected.map { it.copy(id = 0).toEntity() }
-                panelDao.replaceDetectedUnlessManual(
-                    comicId = comicId,
-                    pageIndex = pageIndex,
-                    panels = entities,
-                    finalState = PanelPageStateEntity(
-                        comicId = comicId,
-                        pageIndex = pageIndex,
-                        status = status.name,
-                        panelCount = entities.size,
-                        errorMessage = if (detected.isEmpty()) "No panels detected" else null
-                    )
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                panelDao.markFailedUnlessManual(
-                    comicId,
-                    pageIndex,
-                    error.message ?: "Page analysis failed"
-                )
             }
         }
         pending.size > batchSize

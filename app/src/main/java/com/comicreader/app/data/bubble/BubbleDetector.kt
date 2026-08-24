@@ -39,8 +39,8 @@ private const val MODEL_ASSET = "models/bubble_segment.onnx"
 // The bundled bubble_segment.onnx model has a fixed 1024 x 1024 input.
 private const val INPUT_SIZE = 1024
 private const val MASK_CHANNELS = 32
-private const val CONFIDENCE_THRESHOLD = 0.20f
-private const val IOU_THRESHOLD = 0.58f
+private const val CONFIDENCE_THRESHOLD = 0.35f
+private const val IOU_THRESHOLD = 0.30f
 private const val MASK_THRESHOLD = 0.50f
 private const val MAX_PAGE_DIMENSION = 3200
 private const val MIN_NORMALIZED_AREA = 0.00025f
@@ -83,8 +83,8 @@ private const val HARD_GATE_SURFACE_QUALITY = 0.40f
 private const val HARD_GATE_BOUNDARY_EVIDENCE = 0.42f
 private const val HARD_GATE_MAX_HOLE_RATIO = 0.035f
 private const val HARD_GATE_MIN_CROP_SAFETY = 0.70f
-private const val MASK_CACHE_VERSION = "v32_"
-private const val DIAGNOSTIC_TAG = "BubbleZoomV32"
+private const val MASK_CACHE_VERSION = BubbleDetectionContract.MASK_VERSION
+private const val DIAGNOSTIC_TAG = BubbleDetectionContract.DIAGNOSTIC_TAG
 
 /**
  * Hybrid on-device dialogue detector. YOLO finds balloon-shaped objects while
@@ -148,7 +148,12 @@ class BubbleDetector @Inject constructor(
                 logStage(
                     stage = "PROPOSALS",
                     outcome = "INFO",
-                    detail = "model=${shapeDetections.size}, ocr=${textRegions.size}"
+                    detail = "model=${shapeDetections.size}, ocr=${textRegions.size}, classes=" +
+                            shapeDetections.groupingBy { it.modelClass }
+                                .eachCount()
+                                .entries
+                                .joinToString(",") { "${it.key}:${it.value}" }
+                                .ifBlank { "none" }
                 )
                 val detections = buildHybridDetections(
                     shapeDetections = shapeDetections,
@@ -246,6 +251,8 @@ class BubbleDetector @Inject constructor(
         val channels = predictionShape[1].toInt()
         val anchors = predictionShape[2].toInt()
         require(channels >= 5 + MASK_CHANNELS) { "Unexpected balloon model output" }
+        val classCount = channels - 4 - MASK_CHANNELS
+        require(classCount >= 1) { "Balloon model must expose at least one class" }
 
         require(prototypeShape.size == 4) { "Unexpected balloon prototype output" }
         val prototypeHeight = prototypeShape[2].toInt()
@@ -255,7 +262,15 @@ class BubbleDetector @Inject constructor(
         fun prediction(channel: Int, anchor: Int): Float = predictions.get(channel * anchors + anchor)
         val candidates = ArrayList<DetectedBubble>()
         for (anchor in 0 until anchors) {
-            val confidence = prediction(4, anchor)
+            var classIndex = 0
+            var confidence = prediction(4, anchor)
+            for (candidateClass in 1 until classCount) {
+                val candidateConfidence = prediction(4 + candidateClass, anchor)
+                if (candidateConfidence > confidence) {
+                    confidence = candidateConfidence
+                    classIndex = candidateClass
+                }
+            }
             if (confidence < CONFIDENCE_THRESHOLD) continue
 
             val centerX = prediction(0, anchor)
@@ -274,14 +289,28 @@ class BubbleDetector @Inject constructor(
             if (right <= left || bottom <= top || normalizedArea < MIN_NORMALIZED_AREA) continue
 
             val coefficients = FloatArray(MASK_CHANNELS) { channel ->
-                prediction(5 + channel, anchor)
+                prediction(4 + classCount + channel, anchor)
             }
             candidates += DetectedBubble(
                 left, top, right, bottom, confidence, coefficients,
-                prototypeValues, prototypeWidth, prototypeHeight, letterbox
+                prototypeValues, prototypeWidth, prototypeHeight, letterbox,
+                modelClass = decodeModelClass(classIndex, classCount)
             )
         }
         return nonMaximumSuppression(candidates)
+    }
+
+    private fun decodeModelClass(index: Int, classCount: Int): BubbleModelClass {
+        if (classCount == 1) return BubbleModelClass.GENERIC
+        return when (index) {
+            0 -> BubbleModelClass.SPEECH
+            1 -> BubbleModelClass.THOUGHT
+            2 -> BubbleModelClass.SHOUT
+            3 -> BubbleModelClass.WHISPER
+            4 -> BubbleModelClass.ELECTRONIC
+            5 -> BubbleModelClass.CAPTION
+            else -> BubbleModelClass.UNKNOWN
+        }
     }
 
     /** Combines segmentation shapes with OCR and builds logical dialogue groups. */
@@ -5481,7 +5510,8 @@ class BubbleDetector @Inject constructor(
         val partitionRegionGroups: List<List<DialogueTextRegion>> = emptyList(),
         val partitionRegionIndex: Int = -1,
         val isOcrFallback: Boolean = false,
-        val candidateKind: CandidateKind = CandidateKind.SPEECH_BALLOON
+        val candidateKind: CandidateKind = CandidateKind.SPEECH_BALLOON,
+        val modelClass: BubbleModelClass = BubbleModelClass.GENERIC
     ) {
         val width: Float get() = right - left
         val height: Float get() = bottom - top

@@ -1,0 +1,12 @@
+path: dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: speech
+  1: thought
+  2: shout
+  3: whisper
+  4: electronic
+  5: caption

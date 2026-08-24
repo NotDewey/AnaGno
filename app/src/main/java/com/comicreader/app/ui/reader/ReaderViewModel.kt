@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import com.comicreader.app.data.comic.ComicPageRef
 import com.comicreader.app.data.bubble.BubbleDetector
+import com.comicreader.app.data.bubble.BubbleDetectionContract
 import com.comicreader.app.data.panel.PanelDetector
 import com.comicreader.app.data.preferences.ReaderPreferences
 import com.comicreader.app.data.repository.ComicRepository
@@ -30,11 +31,8 @@ import javax.inject.Inject
 enum class ReadingMode { HORIZONTAL_PAGES, VERTICAL_SCROLL }
 enum class ReadingDirection { LEFT_TO_RIGHT, RIGHT_TO_LEFT }
 
-private const val BUBBLE_MASK_VERSION =
-    "v32_"
-
 private const val BUBBLE_DIAGNOSTIC_TAG =
-    "BubbleZoomV32"
+    BubbleDetectionContract.DIAGNOSTIC_TAG
 
 private const val PREVIEW_REQUEST_DEBOUNCE_MS =
     50L
@@ -876,19 +874,40 @@ class ReaderViewModel @Inject constructor(
         bubbleLoadJob?.cancel()
         bubbleLoadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                isDetectingBubbles = true,
+                isDetectingBubbles = forceDetection,
                 bubbleZoomError = null,
                 bubbles = emptyList(),
                 activeBubbleIndex = 0
             )
             try {
-                val saved = if (forceDetection) emptyList()
-                else repository.getBubbles(comic.id, pageIndex).filter {
-                    it.hasCurrentMask()
+                val indexed = if (forceDetection) null else {
+                    repository.getIndexedBubbles(
+                        comicId = comic.id,
+                        pageIndex = pageIndex,
+                        // A background-indexed page is fast, but the first
+                        // interactive V35.1 visit still needs one A/B capture.
+                        requireEvidence = true
+                    )
                 }
-                val detected = if (saved.isNotEmpty()) saved
-                else bubbleDetector.detect(pagePath, comic.id, pageIndex).also {
-                    repository.saveBubbles(comic.id, pageIndex, it)
+                val detected = indexed ?: run {
+                    val beforeDetection = _uiState.value
+                    if (beforeDetection.currentPage != pageIndex ||
+                        !beforeDetection.bubbleZoomEnabled
+                    ) {
+                        return@launch
+                    }
+                    _uiState.value = beforeDetection.copy(isDetectingBubbles = true)
+                    repository.getOrDetectBubbles(
+                        comic = comic,
+                        pageIndex = pageIndex,
+                        pagePath = pagePath,
+                        detector = bubbleDetector,
+                        forceDetection = forceDetection,
+                        // Interactive pages may export the V35.1 A/B evidence.
+                        // The background whole-comic indexer leaves this off so
+                        // diagnostics never turn into hundreds of extra PNGs.
+                        exportEvidence = true
+                    )
                 }
                 val currentState = _uiState.value
                 val currentPath = currentState.pages.getOrNull(pageIndex)?.localPath
@@ -992,11 +1011,6 @@ class ReaderViewModel @Inject constructor(
         return topDifference <= smallerHeight * 0.55f ||
                 centerDifference <= smallerHeight * 0.55f
     }
-
-    private fun Bubble.hasCurrentMask(): Boolean =
-        maskPath.isNotBlank() &&
-                File(maskPath).isFile &&
-                File(maskPath).name.startsWith(BUBBLE_MASK_VERSION)
 
     private fun persistProgressAndMaybeComplete(
         page: Int
@@ -1150,6 +1164,7 @@ class ReaderViewModel @Inject constructor(
             requestPage(currentPage)
             requestPage(currentPage - 1)
             requestPage(currentPage + 1)
+            repository.activateBubbleDetection(comicId)
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(
                 comic = loadedComic,

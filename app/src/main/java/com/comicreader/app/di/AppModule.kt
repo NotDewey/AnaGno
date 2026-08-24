@@ -185,6 +185,30 @@ object AppModule {
         }
     }
 
+    private val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `bubble_page_states` (
+                    `comicId` INTEGER NOT NULL,
+                    `pageIndex` INTEGER NOT NULL,
+                    `status` TEXT NOT NULL,
+                    `maskVersion` TEXT NOT NULL,
+                    `bubbleCount` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL,
+                    `errorMessage` TEXT,
+                    PRIMARY KEY(`comicId`, `pageIndex`),
+                    FOREIGN KEY(`comicId`) REFERENCES `comics`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_bubble_page_states_comicId` " +
+                        "ON `bubble_page_states` (`comicId`)"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(
@@ -201,7 +225,8 @@ object AppModule {
                 MIGRATION_3_4,
                 MIGRATION_4_5,
                 MIGRATION_5_6,
-                MIGRATION_6_7
+                MIGRATION_6_7,
+                MIGRATION_7_8
             )
             .build()
 

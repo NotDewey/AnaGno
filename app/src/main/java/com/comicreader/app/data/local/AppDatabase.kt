@@ -9,6 +9,7 @@ import com.comicreader.app.data.local.dao.ComicDao
 import com.comicreader.app.data.local.dao.PanelDao
 import com.comicreader.app.data.local.entities.BookmarkEntity
 import com.comicreader.app.data.local.entities.BubbleEntity
+import com.comicreader.app.data.local.entities.BubblePageStateEntity
 import com.comicreader.app.data.local.entities.CollectionComicCrossRef
 import com.comicreader.app.data.local.entities.CollectionEntity
 import com.comicreader.app.data.local.entities.ComicEntity
@@ -22,10 +23,11 @@ import com.comicreader.app.data.local.entities.PanelPageStateEntity
         PanelEntity::class,
         PanelPageStateEntity::class,
         BubbleEntity::class,
+        BubblePageStateEntity::class,
         CollectionEntity::class,
         CollectionComicCrossRef::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
