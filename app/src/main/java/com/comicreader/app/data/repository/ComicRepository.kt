@@ -371,9 +371,9 @@ class ComicRepository @Inject constructor(
                 val detected = detector.detect(
                     pagePath = pagePath,
                     comicId = comic.id,
-                    pageIndex = pageIndex,
-                    exportEvidence = exportEvidence
+                    pageIndex = pageIndex
                 )
+
                 val normalized = detected.mapIndexed { index, bubble ->
                     bubble.copy(
                         id = 0,
