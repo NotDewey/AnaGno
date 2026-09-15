@@ -206,6 +206,15 @@ class BubbleDetector @Inject constructor(
                                 bottom = savedCutout.bottom / source.height,
                                 text = detected.textRegion?.text.orEmpty(),
                                 maskPath = savedCutout.path,
+                                textHeightRatio = detected.textRegions.ifEmpty {
+                                    listOfNotNull(detected.textRegion)
+                                }.map { it.height / it.lineCount.coerceAtLeast(1) }
+                                    .filter { it.isFinite() && it > 0f }
+                                    .sorted()
+                                    .let { heights ->
+                                        if (heights.isEmpty()) 0f
+                                        else heights[(heights.size - 1) / 2] / source.height
+                                    },
                                 confidence = if (savedCutout.isPresentationFallback) {
                                     min(detected.confidence, 0.40f)
                                 } else {
@@ -1994,7 +2003,9 @@ class BubbleDetector @Inject constructor(
         }
         val isPresentationFallback = selectedExact == null && polishedFallback != null
         val selectedStrategy = selectedExact?.strategy ?: MaskStrategy.POLISHED_PAGE_CONTEXT
-        val finalAlpha = selectedExact?.alpha ?: polishedFallback
+        val finalAlpha = selectedExact?.alpha?.let {
+            softenMaskBoundary(it, width, height)
+        } ?: polishedFallback
         if (finalAlpha == null) {
             logStage(
                 stage = "MASK_SELECTION",

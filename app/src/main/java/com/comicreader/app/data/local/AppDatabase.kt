@@ -27,7 +27,7 @@ import com.comicreader.app.data.local.entities.PanelPageStateEntity
         CollectionEntity::class,
         CollectionComicCrossRef::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

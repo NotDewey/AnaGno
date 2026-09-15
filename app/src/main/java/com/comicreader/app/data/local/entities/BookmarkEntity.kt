@@ -87,14 +87,15 @@ data class BubbleEntity(
     val text: String,
     @ColumnInfo(defaultValue = "''") val maskPath: String,
     @ColumnInfo(defaultValue = "1") val confidence: Float,
-    @ColumnInfo(defaultValue = "0") val isManual: Boolean
+    @ColumnInfo(defaultValue = "0") val isManual: Boolean,
+    @ColumnInfo(defaultValue = "0") val textHeightRatio: Float = 0f
 )
 
 fun BubbleEntity.toDomain() = Bubble(
     id, comicId, pageIndex, order, left, top, right, bottom,
-    text, maskPath, confidence, isManual
+    text, maskPath, confidence, isManual, textHeightRatio
 )
 fun Bubble.toEntity() = BubbleEntity(
     id, comicId, pageIndex, order, left, top, right, bottom,
-    text, maskPath, confidence, isManual
+    text, maskPath, confidence, isManual, textHeightRatio
 )

@@ -64,7 +64,9 @@ data class Bubble(
     val maskPath: String = "",
     val confidence: Float = 1f,
     /** True after the reader has explicitly corrected this balloon's order. */
-    val isManual: Boolean = false
+    val isManual: Boolean = false,
+    /** Estimated OCR line height divided by source page height; zero means unknown. */
+    val textHeightRatio: Float = 0f
 )
 
 enum class PanelPageStatus {

@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -3092,20 +3093,21 @@ private data class BubbleFrame(
 private fun computeBubbleFrame(
     bubble: Bubble,
     pageWidth: Dp, pageHeight: Dp, pageLeft: Dp, pageTop: Dp,
-    containerWidth: Dp, containerHeight: Dp
+    containerWidth: Dp, containerHeight: Dp, targetTextHeight: Dp
 ): BubbleFrame {
     val sourceWidth = (pageWidth * (bubble.right - bubble.left)).coerceAtLeast(20.dp)
     val sourceHeight = (pageHeight * (bubble.bottom - bubble.top)).coerceAtLeast(16.dp)
     val margin = 8.dp
     val availableWidth = (containerWidth - margin * 2).coerceAtLeast(1.dp)
     val availableHeight = (containerHeight - margin * 2).coerceAtLeast(1.dp)
-    val maximumWidth = minOf(containerWidth * 0.86f, availableWidth)
-    val maximumHeight = minOf(containerHeight * 0.48f, availableHeight)
-    val magnification = minOf(
-        2f,
-        maximumWidth.value / sourceWidth.value,
-        maximumHeight.value / sourceHeight.value
-    ).coerceAtLeast(0.01f)
+    val magnification = bubbleMagnification(
+        sourceWidth = sourceWidth.value,
+        sourceHeight = sourceHeight.value,
+        textHeight = pageHeight.value * bubble.textHeightRatio,
+        targetTextHeight = targetTextHeight.value,
+        availableWidth = availableWidth.value,
+        availableHeight = availableHeight.value
+    )
     val width = sourceWidth * magnification
     val height = sourceHeight * magnification
     val centerX = pageLeft + pageWidth * ((bubble.left + bubble.right) / 2f)
@@ -3132,6 +3134,7 @@ private fun BubbleMagnifier(
     containerWidth: Dp,
     containerHeight: Dp
 ) {
+    val targetTextHeight = with(LocalDensity.current) { 14.sp.toDp() }
     // Detected bubbles have database id=0 until they are read back from Room.
     // Coordinates/path/order therefore form the real render identity.
     val frame = remember(
@@ -3142,6 +3145,8 @@ private fun BubbleMagnifier(
         bubble.right,
         bubble.bottom,
         bubble.maskPath,
+        bubble.textHeightRatio,
+        targetTextHeight,
         pageWidth,
         pageHeight,
         pageLeft,
@@ -3149,7 +3154,7 @@ private fun BubbleMagnifier(
         containerWidth,
         containerHeight
     ) {
-        computeBubbleFrame(bubble, pageWidth, pageHeight, pageLeft, pageTop, containerWidth, containerHeight)
+        computeBubbleFrame(bubble, pageWidth, pageHeight, pageLeft, pageTop, containerWidth, containerHeight, targetTextHeight)
     }
 
     LaunchedEffect(frame, bubble.maskPath) {
