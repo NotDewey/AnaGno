@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "kind": "synthetic",
+  "real_accuracy_baseline": "BLOCKED: no real ground truth supplied",
+  "rectangles": {"foreground_pixels":60,"instance_perfect":{"tp":2,"fp":0,"fn":0,"iou_sum":2},"group_merged_perfect":{"tp":1,"fp":0,"fn":0,"iou_sum":1}},
+  "negative": {"foreground_pixels":0,"empty_prediction":{"tp":0,"fp":0,"fn":0}},
+  "transition_foreground_pixels":20,
+  "half_width_shift": {"gt_box":[0,0,4,4],"prediction_box":[2,0,6,4],"intersection":8,"union":24,"iou_fraction":[1,3]},
+  "alpha_edge": {"coverage":[0,8,9,127,128,255],"threshold_128":[0,0,0,0,1,1],"threshold_9":[0,0,1,1,1,1]}
+}

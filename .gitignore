@@ -23,3 +23,8 @@ hs_err_pid*
 *.jks
 *.keystore
 keystore.properties
+
+qa/bubble/runs/
+qa/bubble/private/
+qa/bubble/generated-fixtures/
+tools/bubble_eval/**/__pycache__/

@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "v35.1-testing-foundation",
+  "production_contract": "v35_2_",
+  "status": "baseline_pending",
+  "core": {
+    "kind": "real",
+    "pages": 48,
+    "annotation_completeness": "mask",
+    "source_group_disjoint_splits": true,
+    "splits": {
+      "development": {
+        "pages": 12,
+        "min_instances": 30,
+        "min_negative_pages": 2
+      },
+      "regression": {
+        "pages": 24,
+        "min_instances": 90,
+        "min_negative_pages": 2
+      },
+      "holdout": {
+        "pages": 12,
+        "min_instances": 30,
+        "min_negative_pages": 2
+      }
+    }
+  },
+  "metrics": {
+    "recall": "All scheduled valid-page attempts; detector_failed contributes every GT instance as FN.",
+    "false_positives_per_page": "Successful fully annotated valid-page attempts only, per mode; failed pages prohibit full-corpus FP claims.",
+    "mask_iou": "Only checksummed mask pairs with documented mapping; failed valid-page attempts contribute zero.",
+    "failure_rate": "All scheduled valid-page attempts, separate from successful-page FP.",
+    "latency": "Per mode and device, completed attempts only; expose failures, watchdogs and censored attempts separately.",
+    "memory": "Physical-device PSS separately from Java/native allocations; no host-to-device equivalence."
+  },
+  "gates": {
+    "record_validity": "No invalid evidence, missing attempts, missing assets or provenance mismatch.",
+    "product_quality": "BLOCKED until real corpus admitted and baseline measured; numeric regression thresholds await approval.",
+    "device": "BLOCKED until physical Pixel 8 Pro and Samsung A12 evidence captured."
+  },
+  "required_tags": [
+    "oval",
+    "rectangle",
+    "irregular",
+    "tail",
+    "small_text",
+    "no_text",
+    "dense_panels",
+    "negative",
+    "false_positive_regions",
+    "connected",
+    "rotated",
+    "dark",
+    "high_resolution"
+  ],
+  "statistical_scope": "Paired identical corpus and policy. Source-family clustered uncertainty; repeated attempts do not increase independent page count. Holdout cannot tune thresholds."
+}

@@ -1,0 +1,4 @@
+# Project-level Codex preferences. Applied when this repository is trusted.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4

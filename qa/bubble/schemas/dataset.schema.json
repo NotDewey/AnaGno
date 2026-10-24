@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anagno.invalid/bubble-testing/1.0/dataset.schema.json",
+  "title": "dataset",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "dataset_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "kind": {
+      "enum": [
+        "real",
+        "synthetic"
+      ]
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sample_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "source_group": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "split": {
+            "enum": [
+              "development",
+              "regression",
+              "holdout"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "rights_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "asset": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "width",
+              "height"
+            ],
+            "additionalProperties": false
+          },
+          "annotation": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "completeness": {
+                "enum": [
+                  "count",
+                  "box",
+                  "mask"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "completeness"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "sample_id",
+          "source_group",
+          "split",
+          "tags",
+          "rights_id",
+          "asset",
+          "annotation"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "revision",
+    "kind",
+    "samples"
+  ],
+  "additionalProperties": false
+}

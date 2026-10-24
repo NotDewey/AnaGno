@@ -1,0 +1,44 @@
+name: Android validation
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  host-evidence:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate evidence tools without external Python dependencies
+        run: |
+          python3 -m unittest discover -s tools/bubble_eval/tests -v
+          python3 tools/bubble_eval/run_android.py --self-test
+          python3 tools/bubble_eval/validate.py manifest qa/bubble/manifest.json
+  gradle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate wrapper and discover project tasks
+        shell: bash
+        run: |
+          test -f gradlew || { echo 'Gradle wrapper missing'; exit 1; }
+          chmod +x gradlew
+          ./gradlew --offline --no-daemon tasks --all
+          ./gradlew --offline --no-daemon -PbubbleValidation=true :app:tasks --all
+      - name: Build and unit-test app with pre-provisioned dependencies
+        run: ./gradlew --offline --no-daemon :app:assembleDebug :app:testDebugUnitTest
+      - name: Compile isolated detector instrumentation APK
+        if: always()
+        run: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:assembleBubbleValidation :app:assembleBubbleValidationAndroidTest

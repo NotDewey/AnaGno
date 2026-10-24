@@ -1,0 +1,490 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anagno.invalid/bubble-testing/1.0/run.schema.json",
+  "title": "run",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "production_revision": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "harness_revision": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "model_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "corpus_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "annotations_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "policy_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "device_fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "device_model": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "runtime_kind": {
+          "enum": [
+            "host",
+            "emulator",
+            "physical"
+          ]
+        },
+        "build_variant": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "contract": {
+          "const": "v35_2_"
+        }
+      },
+      "required": [
+        "production_revision",
+        "harness_revision",
+        "model_sha256",
+        "corpus_sha256",
+        "annotations_sha256",
+        "policy_sha256",
+        "device_fingerprint",
+        "device_model",
+        "runtime_kind",
+        "build_variant",
+        "contract"
+      ],
+      "additionalProperties": false
+    },
+    "schedule": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "sample_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "mode": {
+            "enum": [
+              "cold_inference",
+              "warm_inference",
+              "cache_hit"
+            ]
+          },
+          "expected": {
+            "enum": [
+              "valid",
+              "invalid_input"
+            ]
+          }
+        },
+        "required": [
+          "attempt_id",
+          "sample_id",
+          "mode",
+          "expected"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "sample_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "mode": {
+            "enum": [
+              "cold_inference",
+              "warm_inference",
+              "cache_hit"
+            ]
+          },
+          "status": {
+            "enum": [
+              "success",
+              "detector_failed",
+              "invalid_evidence"
+            ]
+          },
+          "duration_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "constructor_duration_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memory": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "physical_pss_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "java_allocated_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "native_allocated_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "java_peak_allocated_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "native_peak_allocated_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sampling_interval_ns": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "process": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pid": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "start_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "fresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "timing_scope": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "watchdog_ns": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "thermal_state": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          },
+          "detections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prediction_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "mask_path": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mask_sha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "textHeightRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "text": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "comicId": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "pageIndex": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "order": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "isManual": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "prediction_id",
+                "bounds",
+                "mask_path",
+                "mask_sha256"
+              ],
+              "additionalProperties": true,
+              "allOf": [
+                {
+                  "properties": {
+                    "mask_path": {
+                      "type": "string"
+                    },
+                    "mask_sha256": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "required": [
+                      "mask_path"
+                    ],
+                    "properties": {
+                      "mask_path": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "mask_path",
+                      "mask_sha256"
+                    ],
+                    "properties": {
+                      "mask_path": {
+                        "type": "string",
+                        "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+                      },
+                      "mask_sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "required": [
+                      "mask_sha256"
+                    ],
+                    "properties": {
+                      "mask_sha256": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "mask_path",
+                      "mask_sha256"
+                    ],
+                    "properties": {
+                      "mask_path": {
+                        "type": "string",
+                        "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+                      },
+                      "mask_sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "failure_kind": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "cache_hit_evidence": {
+            "type": "object",
+            "properties": {
+              "cache_key": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "inference_invoked": {
+                "const": false
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:])[^/]+(?:/[^/]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "cache_key",
+              "inference_invoked",
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "attempt_id",
+          "sample_id",
+          "mode",
+          "status",
+          "detections"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "success"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "duration_ns"
+              ],
+              "not": {
+                "required": [
+                  "failure_kind"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "failure_kind"
+              ],
+              "properties": {
+                "detections": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "success"
+                },
+                "mode": {
+                  "const": "cache_hit"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "cache_hit_evidence"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "cache_hit_evidence"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "provenance",
+    "schedule",
+    "attempts"
+  ],
+  "additionalProperties": false
+}

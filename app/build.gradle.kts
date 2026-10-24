@@ -47,9 +47,22 @@ android {
     }
 
     buildTypes {
+        if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+            create("bubbleValidation") {
+                initWith(getByName("debug"))
+                applicationIdSuffix = ".bubblevalidation"
+                matchingFallbacks += listOf("debug")
+            }
+        }
         release {
             isMinifyEnabled = false
         }
+    }
+
+    if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+        testBuildType = "bubbleValidation"
+        defaultConfig.testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        sourceSets.getByName("androidTest").java.srcDir("src/androidTest/bubbleValidation")
     }
 
     buildFeatures {
@@ -67,6 +80,15 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+    configurations.named("bubbleValidationImplementation") {
+        extendsFrom(configurations.getByName("debugImplementation"))
+    }
+    configurations.named("bubbleValidationRuntimeOnly") {
+        extendsFrom(configurations.getByName("debugRuntimeOnly"))
     }
 }
 
@@ -139,6 +161,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+        androidTestImplementation("androidx.test:runner:1.5.2")
+        androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    }
 }
 
 // The generated R.raw.deep_panel_model must exist before Android merges app resources.

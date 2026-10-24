@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "production_revision": "a7faaa2430878cfe353f4a4e084c0f9b760e34fd",
+  "contract": "v35_2_",
+  "defects": [
+    {
+      "id": "BZ-STATIC-001",
+      "status": "static_risk",
+      "title": "Equal normalized dialogue can suppress spatially separate bubbles",
+      "source_refs": [
+        "app/src/main/java/com/comicreader/app/data/bubble/BubbleDetector.kt:1272",
+        "app/src/main/java/com/comicreader/app/data/bubble/BubbleDetector.kt:1730"
+      ],
+      "sample_ids": [],
+      "device_reproduction": "not_performed",
+      "disposition": "Production code unchanged; retain misses in the first measured baseline"
+    },
+    {
+      "id": "BZ-STATIC-002",
+      "status": "static_risk",
+      "title": "Interactive cache acceptance requires an evidence marker without an active writer",
+      "source_refs": [
+        "app/src/main/java/com/comicreader/app/ui/reader/ReaderViewModel.kt:883",
+        "app/src/main/java/com/comicreader/app/data/repository/ComicRepository.kt:336"
+      ],
+      "sample_ids": [],
+      "device_reproduction": "not_performed",
+      "disposition": "Do not fabricate the marker or label direct warm inference as a cache hit"
+    }
+  ]
+}

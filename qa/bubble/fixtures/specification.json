@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "kind": "synthetic",
+  "description": "Original authored geometry, never real detector accuracy. Generator emits manifest.json, PNGs and independent labels. Long narrow strips bound size while exercising coordinate transition dimensions.",
+  "pages": [
+    {"sample_id":"rectangles","width":16,"height":12,"tags":["synthetic","two-instances","negative-artwork"],"instances":[{"id":"left","box":[1,2,5,8]},{"id":"right","box":[8,3,14,9]}],"groups":[{"id":"pair","members":["left","right"]}]},
+    {"sample_id":"negative","width":11,"height":7,"tags":["synthetic","negative"],"instances":[]},
+    {"sample_id":"transition-3199","width":3199,"height":9,"tags":["synthetic","transition-dimension"],"instances":[{"id":"edge","box":[3195,2,3199,7]}]},
+    {"sample_id":"transition-3200","width":3200,"height":9,"tags":["synthetic","transition-dimension"],"instances":[{"id":"edge","box":[3196,2,3200,7]}]},
+    {"sample_id":"transition-3201","width":3201,"height":9,"tags":["synthetic","transition-dimension"],"instances":[{"id":"edge","box":[3197,2,3201,7]}]},
+    {"sample_id":"transition-6401","width":9,"height":6401,"tags":["synthetic","transition-dimension","portrait"],"instances":[{"id":"edge","box":[2,6397,7,6401]}]},
+    {"sample_id":"transition-6402","width":6402,"height":9,"tags":["synthetic","transition-dimension"],"instances":[{"id":"edge","box":[6398,2,6402,7]}]}
+  ]
+}
