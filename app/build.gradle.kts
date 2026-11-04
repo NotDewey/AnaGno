@@ -62,6 +62,7 @@ android {
     if (providers.gradleProperty("bubbleValidation").orNull == "true") {
         testBuildType = "bubbleValidation"
         defaultConfig.testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        defaultConfig.testInstrumentationRunnerArguments["bubbleValidationBootstrap"] = "synthetic_smoke"
         sourceSets.getByName("androidTest").java.srcDir("src/androidTest/bubbleValidation")
     }
 
@@ -170,4 +171,47 @@ dependencies {
 // The generated R.raw.deep_panel_model must exist before Android merges app resources.
 tasks.named("preBuild").configure {
     dependsOn(extractDeepPanelModel)
+}
+
+if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+    val sourceSnapshot = layout.buildDirectory.file("bubble-validation/source-snapshot.json")
+    val validationReceipt = layout.buildDirectory.file("bubble-validation/build-receipt.json")
+    val snapshotBubbleValidationSources by tasks.registering(Exec::class) {
+        group = "verification"
+        description = "Snapshot validation sources before building the isolated APKs."
+        workingDir(rootProject.projectDir)
+        commandLine(
+            "python3", "-m", "tools.bubble_eval.build_receipt", "snapshot",
+            "--root", rootProject.projectDir.absolutePath,
+            "--output", sourceSnapshot.get().asFile.absolutePath
+        )
+        outputs.upToDateWhen { false }
+    }
+    tasks.matching {
+        it.name == "preBubbleValidationBuild" || it.name == "preBubbleValidationAndroidTestBuild"
+    }.configureEach {
+        dependsOn(snapshotBubbleValidationSources)
+    }
+    extractDeepPanelModel.configure {
+        mustRunAfter(snapshotBubbleValidationSources)
+    }
+    tasks.register<Exec>("writeBubbleValidationReceipt") {
+        group = "verification"
+        description = "Bind the source snapshot to both successfully assembled validation APKs."
+        dependsOn(
+            snapshotBubbleValidationSources,
+            "assembleBubbleValidation",
+            "assembleBubbleValidationAndroidTest"
+        )
+        workingDir(rootProject.projectDir)
+        commandLine(
+            "python3", "-m", "tools.bubble_eval.build_receipt", "create",
+            "--root", rootProject.projectDir.absolutePath,
+            "--apk", layout.buildDirectory.dir("outputs/apk/bubbleValidation").get().asFile.absolutePath,
+            "--test-apk", layout.buildDirectory.dir("outputs/apk/androidTest/bubbleValidation").get().asFile.absolutePath,
+            "--snapshot", sourceSnapshot.get().asFile.absolutePath,
+            "--output", validationReceipt.get().asFile.absolutePath
+        )
+        outputs.upToDateWhen { false }
+    }
 }

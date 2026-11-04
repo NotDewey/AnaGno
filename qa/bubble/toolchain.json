@@ -48,7 +48,17 @@
     "ordinary_task_discovery": "PASS: ./gradlew --offline --no-daemon tasks --all",
     "validation_task_discovery": "PASS: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:tasks --all; BUILD SUCCESSFUL in 7s",
     "debug_build_and_unit_tests": "BLOCKED: ./gradlew --offline --no-daemon :app:assembleDebug :app:testDebugUnitTest; exit 1 before compilation; :app:extractDeepPanelModel cannot resolve uncached deeppanel-0.0.1.aar offline (lead evidence)",
-    "instrumentation_apk": "BLOCKED: requires uncached production DeepPanel AAR and test dependencies; compilation not verified"
+    "instrumentation_apk": "BLOCKED: requires uncached production DeepPanel AAR and test dependencies; compilation not verified",
+    "checkpoint_verification": {
+      "checkpoint": "2ef68d9a212f963f6ce974f33d9c7433b9ea997e",
+      "host_tests": "PASS: python3 -m unittest discover -s tools/bubble_eval/tests -q; 86 tests, OK; python3 tools/bubble_eval/run_android.py --self-test; 11 tests, OK (before lead receipt/timeout edits)",
+      "wrapper_version": "PASS: ./gradlew --offline --no-daemon --version; Gradle 8.7, JVM 21.0.4; existing-cache lock access required sandbox escalation; no download",
+      "task_discovery": "PASS: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:tasks --all; BUILD SUCCESSFUL in 12s after correcting lazy AGP task registration",
+      "deep_panel": "BLOCKED freshly reproduced: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:writeBubbleValidationReceipt :app:testBubbleValidationUnitTest; exit 1, BUILD FAILED in 6s before compilation; deeppanel-0.0.1.aar unavailable for offline resolution; no download or substitute",
+      "receipt_task_configuration": "PASS configuration: opt-in source snapshot and receipt tasks discovered; receipt depends on both assemblies; snapshot hooks cover app and AndroidTest pre-build tasks. Actual receipt/APK generation remains BLOCKED by DeepPanel",
+      "resumed_host_tests": "PASS: 96 Python tests and 18 guarded-runner checks after timeout, APK-receipt and CI-gate fixes; physical/emulator execution not performed",
+      "ci_prerequisite_gate": "Fails closed when Gradle 8.7 distribution or DeepPanel AAR cache files are absent; does not provision cache, verify provenance or establish complete offline dependency resolution"
+    }
   },
   "baseline": "BLOCKED: real manifest empty; no physical device measurements",
   "device_tests": "BLOCKED: no captured physical/emulator run",

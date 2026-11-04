@@ -3,7 +3,7 @@
 Example: python3 tools/bubble_eval/run_android.py --manifest qa/bubble/manifest.json
 --policy qa/bubble/acceptance-policy.json --output qa/bubble/runs/device-cold
 --serial SERIAL --runtime-kind physical --mode cold_inference --apk APP.apk
---test-apk TEST.apk --install
+--test-apk TEST.apk --receipt BUILD-RECEIPT.json --install
 
 Each cold attempt has a separate force-stopped instrumentation launch. Warm runs
 perform one untimed warmup then reuse one detector serially. Direct detection
@@ -27,9 +27,11 @@ import uuid
 import zipfile
 
 try:
+    from .build_receipt import source_digest, verify_receipt
     from .report import annotation_digest, canonical_json, sha256_file
     from .validate import validate_manifest, validate_run
 except ImportError:
+    from build_receipt import source_digest, verify_receipt
     from report import annotation_digest, canonical_json, sha256_file
     from validate import validate_manifest, validate_run
 
@@ -57,23 +59,6 @@ def atomic_json(path: Path, record: dict) -> None:
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(canonical_json(record), encoding="utf-8")
     temporary.replace(path)
-
-
-def source_digest(root: Path = ROOT) -> str:
-    paths = set()
-    for directory in ("tools/bubble_eval", "app/src/androidTest", "gradle/wrapper"):
-        paths.update(path for path in (root / directory).rglob("*")
-                     if path.is_file() and "__pycache__" not in path.parts)
-    paths.update(root / name for name in (
-        "app/build.gradle.kts", "build.gradle.kts", "settings.gradle.kts",
-        "gradle.properties", "gradlew", "gradlew.bat", "qa/bubble/toolchain.json"))
-    digest = hashlib.sha256()
-    for path in sorted(paths, key=lambda item: item.relative_to(root).as_posix()):
-        name = path.relative_to(root).as_posix().encode("utf-8")
-        content = path.read_bytes()
-        digest.update(len(name).to_bytes(8, "big") + name)
-        digest.update(len(content).to_bytes(8, "big") + content)
-    return "sha256:" + digest.hexdigest()
 
 
 def command(argv: list[str], *, timeout: float = 30, data: bytes | None = None) -> bytes:
@@ -151,6 +136,46 @@ def verify_prediction(prediction: dict, output: Path, device: Device, session: s
     target.write_bytes(payload)
 
 
+def progress_receipt(device: Device, session: str, output: Path, intent: dict,
+                     input_digest: str, phase: str) -> dict | None:
+    relative = intent["attempt_id"] + "." + phase + ".json"
+    try:
+        payload = device.read(session, relative)
+    except RuntimeError:
+        return None
+    receipt = json.loads(payload)
+    for key in ("attempt_id", "sample_id", "mode"):
+        if receipt[key] != intent[key]:
+            raise ValueError("progress receipt identity mismatch")
+    if receipt["phase"] != phase or receipt["input_sha256"] != input_digest:
+        raise ValueError("progress receipt phase/input mismatch")
+    process = receipt["process"]
+    if (type(process["pid"]) is not int or process["pid"] < 1
+            or not isinstance(process["start_id"], str) or not process["start_id"]
+            or process["fresh"] is not (intent["mode"] == "cold_inference")):
+        raise ValueError("progress receipt process identity invalid")
+    (output / relative).write_bytes(payload)
+    return receipt
+
+
+def missing_result(device: Device, session: str, output: Path, intent: dict,
+                   input_digest: str, timed_out: bool, warm_process: dict | None) -> dict:
+    if not timed_out:
+        return fail(intent, "instrumentation_no_result")
+    try:
+        started = progress_receipt(device, session, output, intent, input_digest, "started")
+        returned = progress_receipt(device, session, output, intent, input_digest, "returned")
+        if returned is not None:
+            return fail(intent, "result_missing_after_return")
+        if started is None:
+            return fail(intent, "host_timeout_without_start_evidence")
+        if warm_process is not None and started["process"] != warm_process:
+            return fail(intent, "progress_receipt_process_changed")
+        return {**fail(intent, "host_timeout", "detector_failed"), "process": started["process"]}
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+        return fail(intent, "invalid_progress_receipt")
+
+
 def capture_group(device: Device, output: Path, intents: list[dict], samples: dict,
                   manifest_dir: Path) -> list[dict]:
     session = uuid.uuid4().hex
@@ -195,9 +220,14 @@ def capture_group(device: Device, output: Path, intents: list[dict], samples: di
     for intent in intents:
         try:
             record = json.loads(device.read(session, intent["attempt_id"] + ".json"))
-        except (RuntimeError, ValueError):
-            records.append(fail(intent, "host_timeout" if timed_out else "instrumentation_no_result",
-                                "detector_failed" if timed_out else "invalid_evidence"))
+        except RuntimeError:
+            records.append(missing_result(
+                device, session, output, intent, samples[intent["sample_id"]]["asset"]["sha256"],
+                timed_out, warm_process,
+            ))
+            continue
+        except (ValueError, OSError, subprocess.SubprocessError):
+            records.append(fail(intent, "invalid_or_unavailable_result_export"))
             continue
         try:
             for key in ("attempt_id", "sample_id", "mode"):
@@ -212,7 +242,7 @@ def capture_group(device: Device, output: Path, intents: list[dict], samples: di
                 verify_prediction(prediction, output, device, session)
             record["runtime"] = timing_metadata(device.timeout)
             records.append(record)
-        except (ValueError, KeyError, TypeError, RuntimeError) as exc:
+        except (ValueError, KeyError, TypeError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
             records.append(fail(intent, "invalid_export_" + type(exc).__name__))
     device.stop()
     for record in records:
@@ -234,9 +264,8 @@ def execute(args: argparse.Namespace) -> int:
     if not manifest["samples"]:
         raise ValueError("BLOCKED: empty manifest; real baseline has no ground truth")
     samples = {sample["sample_id"]: sample for sample in manifest["samples"]}
-    if command(["git", "-C", str(ROOT), "status", "--porcelain", "--", "app/src/main"]).strip():
-        raise ValueError("production source differs from HEAD")
-    production = command(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).decode().strip()
+    receipt = verify_receipt(args.receipt, ROOT, args.apk, args.test_apk)
+    production = receipt["snapshot"]["production_revision"]
     verify_apk(args.apk, PACKAGE, args.aapt)
     verify_apk(args.test_apk, TEST_PACKAGE, args.aapt)
     with zipfile.ZipFile(args.apk) as archive:
@@ -270,10 +299,12 @@ def execute(args: argparse.Namespace) -> int:
                           "contract": "v35_2_"}, "schedule": schedule, "attempts": []}
     atomic_json(args.output / "schedule.json", {"schema_version": "1.0", "schedule": schedule})
     atomic_json(args.output / "run.json", run)
+    atomic_json(args.output / "build-receipt.json", receipt)
     atomic_json(args.output / "capture.json", {
         "schema_version": "1.0", "app_apk_sha256": sha256_file(args.apk),
         "test_apk_sha256": sha256_file(args.test_apk), "serial": args.serial,
         "harness_source_digest": source_digest(),
+        "build_receipt_sha256": sha256_file(args.output / "build-receipt.json"),
         "dataset_kind": manifest["kind"], "measurement": "direct public BubbleDetector.detect",
         "watchdog_ns": int(args.timeout * 1_000_000_000),
         "warmup_calls_per_session": 1 if args.mode == "warm_inference" else 0,
@@ -338,7 +369,10 @@ class GuardTests(unittest.TestCase):
     def test_watchdog_keeps_failed_attempt(self):
         root, intent, samples, device = self.capture_fixture()
         device.call.side_effect = subprocess.TimeoutExpired("adb", 1, output=b"partial")
-        device.read.side_effect = RuntimeError("no result")
+        progress = {key: intent[key] for key in ("attempt_id", "sample_id", "mode")}
+        progress.update(phase="started", input_sha256=samples["synthetic"]["asset"]["sha256"],
+                        process={"pid": 42, "start_id": "100", "fresh": True})
+        device.read.side_effect = [RuntimeError("no result"), json.dumps(progress).encode(), RuntimeError("no return")]
         result = capture_group(device, root, [intent], samples, root)
         self.assertEqual("detector_failed", result[0]["status"])
         self.assertEqual("host_timeout", result[0]["failure_kind"])
@@ -346,6 +380,67 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(1_000_000_000, result[0]["runtime"]["watchdog_ns"])
         self.assertEqual(3, device.stop.call_count)
         self.assertIn(b"HOST WATCHDOG", next(root.glob("launch-*.txt")).read_bytes())
+
+    def test_watchdog_without_start_evidence_does_not_invent_a_detector_failure(self):
+        root, intent, samples, device = self.capture_fixture()
+        device.call.side_effect = subprocess.TimeoutExpired("adb", 1)
+        device.read.side_effect = RuntimeError("no progress or result")
+        record = capture_group(device, root, [intent], samples, root)[0]
+        self.assertEqual("invalid_evidence", record["status"])
+        self.assertEqual("host_timeout_without_start_evidence", record["failure_kind"])
+
+    def test_corrupt_progress_receipt_cannot_prove_detector_failure(self):
+        root, intent, samples, device = self.capture_fixture()
+        device.call.side_effect = subprocess.TimeoutExpired("adb", 1)
+        device.read.side_effect = [RuntimeError("no result"), b"broken JSON"]
+        record = capture_group(device, root, [intent], samples, root)[0]
+        self.assertEqual("invalid_evidence", record["status"])
+        self.assertEqual("invalid_progress_receipt", record["failure_kind"])
+
+    def test_corrupt_terminal_record_is_not_reclassified_as_timeout(self):
+        root, intent, samples, device = self.capture_fixture()
+        device.call.side_effect = subprocess.TimeoutExpired("adb", 1)
+        device.read.return_value = b"broken JSON"
+        record = capture_group(device, root, [intent], samples, root)[0]
+        self.assertEqual("invalid_evidence", record["status"])
+        self.assertEqual("invalid_or_unavailable_result_export", record["failure_kind"])
+
+    def test_warm_batch_timeout_distinguishes_completed_running_and_unstarted(self):
+        root, first, samples, device = self.capture_fixture("warm_inference")
+        intents = [{**first, "attempt_id": identity} for identity in ("a1", "a2", "a3")]
+        process = {"pid": 42, "start_id": "100", "fresh": False}
+        progress = {key: intents[1][key] for key in ("attempt_id", "sample_id", "mode")}
+        progress.update(phase="started", input_sha256=samples["synthetic"]["asset"]["sha256"], process=process)
+        completed = {key: first[key] for key in ("attempt_id", "sample_id", "mode")}
+        completed.update(status="success", duration_ns=5, detections=[], process=process)
+        artifacts = {
+            "warmup.json": {"completed": True, "process": process},
+            "a1.json": completed, "a2.started.json": progress,
+        }
+
+        def read_artifact(session, relative):
+            if relative not in artifacts:
+                raise RuntimeError("no artifact")
+            return json.dumps(artifacts[relative]).encode()
+
+        device.call.side_effect = subprocess.TimeoutExpired("adb", 1)
+        device.read.side_effect = read_artifact
+        records = capture_group(device, root, intents, samples, root)
+        self.assertEqual(["success", "detector_failed", "invalid_evidence"], [record["status"] for record in records])
+        self.assertEqual(["a1", "a2", "a3"], [record["attempt_id"] for record in records])
+
+    def test_missing_export_after_detector_return_is_invalid_not_a_miss(self):
+        root, intent, samples, device = self.capture_fixture()
+        progress = {key: intent[key] for key in ("attempt_id", "sample_id", "mode")}
+        progress.update(input_sha256=samples["synthetic"]["asset"]["sha256"],
+                        process={"pid": 42, "start_id": "100", "fresh": True})
+        device.call.side_effect = subprocess.TimeoutExpired("adb", 1)
+        device.read.side_effect = [RuntimeError("missing result"),
+            json.dumps({**progress, "phase": "started"}).encode(),
+            json.dumps({**progress, "phase": "returned"}).encode()]
+        record = capture_group(device, root, [intent], samples, root)[0]
+        self.assertEqual("invalid_evidence", record["status"])
+        self.assertEqual("result_missing_after_return", record["failure_kind"])
 
     def test_completed_output_survives_late_watchdog(self):
         root, intent, samples, device = self.capture_fixture()
@@ -414,6 +509,28 @@ class GuardTests(unittest.TestCase):
                     execute(argparse.Namespace(mode="cold_inference", manifest=Path("empty")))
                 mocked.assert_not_called()
 
+    def test_missing_build_receipt_blocks_before_apk_or_device_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            arguments = argparse.Namespace(mode="cold_inference", manifest=Path("manifest.json"),
+                receipt=Path(directory) / "missing.json", apk=Path("app.apk"), test_apk=Path("test.apk"))
+            with patch(__name__ + ".validate_manifest", return_value={"samples": [{"sample_id": "synthetic"}]}):
+                with patch(__name__ + ".command") as mocked:
+                    with self.assertRaisesRegex(ValueError, "Build evidence"):
+                        execute(arguments)
+                    mocked.assert_not_called()
+
+    def test_stale_or_mismatched_receipt_rejection_precedes_device_commands(self):
+        arguments = argparse.Namespace(mode="cold_inference", manifest=Path("manifest.json"),
+            receipt=Path("receipt.json"), apk=Path("app.apk"), test_apk=Path("test.apk"))
+        for reason in ("stale source", "mismatched APK"):
+            with self.subTest(reason=reason):
+                with patch(__name__ + ".validate_manifest", return_value={"samples": [{"sample_id": "synthetic"}]}):
+                    with patch(__name__ + ".verify_receipt", side_effect=ValueError(reason)):
+                        with patch(__name__ + ".command") as mocked:
+                            with self.assertRaisesRegex(ValueError, reason):
+                                execute(arguments)
+                            mocked.assert_not_called()
+
     def test_failure_preserves_schedule_identity(self):
         intent = {"attempt_id": "a1", "sample_id": "s1", "mode": "cold_inference", "expected": "valid"}
         result = fail(intent, "host_timeout", "detector_failed")
@@ -447,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("cold_inference", "warm_inference", "cache_hit"))
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--test-apk", type=Path)
+    parser.add_argument("--receipt", type=Path)
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--aapt", default="aapt")
@@ -455,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(GuardTests))
         return 0 if result.wasSuccessful() else 1
-    required = ("manifest", "policy", "output", "serial", "runtime_kind", "mode", "apk", "test_apk")
+    required = ("manifest", "policy", "output", "serial", "runtime_kind", "mode", "apk", "test_apk", "receipt")
     if any(getattr(args, field) is None for field in required):
         parser.error("required: " + ", ".join("--" + field.replace("_", "-") for field in required))
     if not math.isfinite(args.timeout) or not 1 <= args.timeout <= 3600:

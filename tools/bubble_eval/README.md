@@ -35,6 +35,23 @@ instrumentation compilation have not been verified. No dependency locks or
 verification metadata were fabricated for this incomplete graph. Exact commands
 and the complete changed-file inventory are recorded in RESULTS.md.
 
+## Build-bound APK capture
+
+Once the approved offline build inputs are available, generate the receipt with
+the isolated Gradle task, which snapshots sources before compilation and binds
+both assembled APK hashes afterward:
+
+```sh
+./gradlew --offline --no-daemon -PbubbleValidation=true :app:writeBubbleValidationReceipt
+```
+
+The receipt is `app/build/bubble-validation/build-receipt.json`. Capture now
+requires `--receipt` alongside `--apk` and `--test-apk`. Missing receipts, changed
+sources/revisions, or mismatched APK bytes block capture before device commands.
+Do not manually regenerate a snapshot to label old APKs. Make no source or
+toolchain-record edits between building and capture. This is local build
+consistency evidence, not a signed attestation or a hermetic-build guarantee.
+
 ## Recorded results
 
 Every run has an immutable predeclared `schedule` and explicit `attempts`.
@@ -48,6 +65,13 @@ valid page contributes misses to failure-inclusive quality. Missing or corrupt
 evidence blocks comparison. Failed pages cannot improve false-positive claims:
 FP/page is conditional on successful fully annotated pages, with failure rate
 reported separately, and full-corpus FP comparison is blocked by any failure.
+
+Instrumentation writes input- and process-bound `started`/`returned` receipts
+around each timed call, outside the timing interval. A session watchdog is not
+proof that every warm-batch job started. Missing terminal output counts as a
+detector timeout only with valid start evidence and no return receipt; unstarted,
+unproven, corrupt, or post-return missing exports remain invalid evidence.
+Completed results survive a later session timeout.
 
 Public normalized cutout bounds and PNG alpha are projected onto the annotated
 full-page raster. Box and mask matching, individual bubbles and reading groups,

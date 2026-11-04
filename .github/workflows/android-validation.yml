@@ -30,6 +30,21 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate on existing offline prerequisites
+        shell: bash
+        run: |
+          shopt -s nullglob
+          cache_root="${GRADLE_USER_HOME:-$HOME/.gradle}"
+          distributions=("$cache_root"/wrapper/dists/gradle-8.7-bin/*/gradle-8.7/bin/gradle)
+          panels=("$cache_root"/caches/modules-2/files-2.1/com.github.pedrovgs/deeppanel/0.0.1/*/deeppanel-0.0.1.aar)
+          if (( ${#distributions[@]} == 0 || ${#panels[@]} == 0 )); then
+            echo '::error::BLOCKED: offline Gradle 8.7 distribution or approved DeepPanel AAR is absent. This workflow does not provision dependencies or download models.'
+            exit 1
+          fi
+          echo 'Offline prerequisite files found; provenance and complete dependency resolution are not established by this gate.'
       - name: Validate wrapper and discover project tasks
         shell: bash
         run: |
@@ -40,5 +55,4 @@ jobs:
       - name: Build and unit-test app with pre-provisioned dependencies
         run: ./gradlew --offline --no-daemon :app:assembleDebug :app:testDebugUnitTest
       - name: Compile isolated detector instrumentation APK
-        if: always()
-        run: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:assembleBubbleValidation :app:assembleBubbleValidationAndroidTest
+        run: ./gradlew --offline --no-daemon -PbubbleValidation=true :app:writeBubbleValidationReceipt

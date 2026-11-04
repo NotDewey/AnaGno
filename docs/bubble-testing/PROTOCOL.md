@@ -145,6 +145,14 @@ captured Android/device evidence.
 
 ## Run capture and provenance
 
+The ordinary `-PbubbleValidation=true :app:connectedBubbleValidationAndroidTest`
+task is also an explicitly configured invocation smoke check. Its validation-only
+runner argument initializes a fresh synthetic session when no external session is
+supplied. It executes the real detector and does not establish a corpus baseline.
+An explicitly supplied session still follows strict staging; it never falls back
+to smoke data. See [the A16 session fix](A16-SESSION-FIX.md) for lifecycle,
+regressions, build evidence and the current device-rerun status.
+
 Write and archive the schedule **before** launching any detector calls. Hash
 that immutable schedule and retain launch logs; final JSON by itself cannot
 prove launch order. Each planned attempt has a unique ID, sample ID, mode and
@@ -152,6 +160,28 @@ expected input validity. Retries require their own predeclared attempt IDs.
 Every scheduled attempt must appear once; extras and missing attempts block
 comparison. Preserve the original schedule when a watchdog kills the process.
 Record failure evidence or mark the export incomplete; never fabricate success.
+
+The resumed runner requires a build-bound receipt. After provisioning approved
+offline inputs, run:
+
+```sh
+./gradlew --offline --no-daemon -PbubbleValidation=true :app:writeBubbleValidationReceipt
+```
+
+The task snapshots production revision/tree and harness inputs before compilation,
+then binds both final APK hashes only if sources still match. Pass its output,
+`app/build/bubble-validation/build-receipt.json`, as `--receipt` to the capture
+runner. The runner rejects absent/stale receipts and APK mismatches before ADB,
+preserves the receipt in the capture bundle, and takes source identity from it.
+This is local consistency evidence, not signed or independently trusted provenance.
+Do not relabel pre-existing APKs by manually creating a new source snapshot.
+
+Per-attempt `started` and `returned` receipts include attempt/sample/mode identity,
+input hash and process identity. They are written outside the timed interval.
+Only a valid started-but-not-returned attempt can become a watchdog detector
+failure. A later unstarted warm-batch job cannot inherit that failure. Missing or
+corrupt receipts, and missing exports after a return, block evidence rather than
+inventing misses. Completed exports are preserved if a later job times out.
 
 Modes remain separate:
 
