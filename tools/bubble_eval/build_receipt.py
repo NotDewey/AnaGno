@@ -33,7 +33,7 @@ def _digest_paths(root: Path, paths: set[Path]) -> str:
 
 def source_digest(root: Path = ROOT) -> str:
     paths = set()
-    for directory in ("tools/bubble_eval", "app/src/androidTest", "gradle/wrapper"):
+    for directory in ("tools/bubble_eval", "app/src/androidTest", "app/src/developerEvaluation", "gradle/wrapper"):
         paths.update(path for path in (root / directory).rglob("*")
                      if path.is_file() and "__pycache__" not in path.parts)
     paths.update(root / name for name in (

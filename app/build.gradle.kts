@@ -18,6 +18,23 @@ val deepPanelModelAar by configurations.creating {
 val generatedDeepPanelResources =
     layout.buildDirectory.dir("generated/deeppanelModel/res")
 
+val generatedEvaluationAssets = layout.buildDirectory.dir("generated/evaluation/assets")
+val generateEvaluationIdentity by tasks.registering(Exec::class) {
+    group = "verification"
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "-m", "tools.bubble_eval.build_receipt", "snapshot",
+        "--root", rootProject.projectDir.absolutePath,
+        "--output", generatedEvaluationAssets.get().file("evaluation-build.json").asFile.absolutePath)
+    outputs.upToDateWhen { false }
+}
+val copyEvaluationPolicy by tasks.registering(Copy::class) {
+    from(rootProject.file("qa/bubble/acceptance-policy.json"))
+    into(generatedEvaluationAssets)
+    rename { "evaluation-policy.json" }
+}
+tasks.matching { it.name == "preDebugBuild" || it.name == "preBubbleValidationBuild" }
+    .configureEach { dependsOn(generateEvaluationIdentity, copyEvaluationPolicy) }
+
 val extractDeepPanelModel by tasks.registering(Sync::class) {
     from({
         deepPanelModelAar.files.map { aar -> zipTree(aar) }
@@ -47,6 +64,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".evaluation"
+        }
         if (providers.gradleProperty("bubbleValidation").orNull == "true") {
             create("bubbleValidation") {
                 initWith(getByName("debug"))
@@ -56,6 +76,20 @@ android {
         }
         release {
             isMinifyEnabled = false
+        }
+    }
+
+    // Private evaluation tooling is compiled only into developer variants.
+    sourceSets.getByName("debug") {
+        java.srcDir("src/developerEvaluation/java")
+        manifest.srcFile("src/developerEvaluation/AndroidManifest.xml")
+        assets.srcDir(generatedEvaluationAssets)
+    }
+    if (providers.gradleProperty("bubbleValidation").orNull == "true") {
+        sourceSets.getByName("bubbleValidation") {
+            java.srcDir("src/developerEvaluation/java")
+            manifest.srcFile("src/developerEvaluation/AndroidManifest.xml")
+            assets.srcDir(generatedEvaluationAssets)
         }
     }
 

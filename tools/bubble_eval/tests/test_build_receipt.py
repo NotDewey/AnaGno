@@ -87,6 +87,16 @@ class BuildReceiptTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 self.verify()
 
+    def test_developer_evaluation_sources_are_bound_to_apk_receipt(self):
+        source = self.root / "app/src/developerEvaluation/java/EvaluationStore.kt"
+        source.parent.mkdir(parents=True)
+        source.write_text("temporary developer feature source", encoding="utf-8")
+        write_snapshot(self.root, self.snapshot_path)
+        self.create()
+        source.write_text("changed developer feature source", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            self.verify()
+
     def test_either_apk_hash_mismatch_blocks_capture(self):
         for artifact in (self.app_apk, self.test_apk):
             with self.subTest(artifact=artifact.name, directory=artifact.parent):
